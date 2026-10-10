@@ -1,0 +1,394 @@
+# GTS — Indice de evidencia
+# Revision: e801d4e + trabajo sin commitear · Fecha: 2026-10-10
+#
+# QUE ES ESTE FICHERO: el registro de lo que se ha MEDIDO, con su comando y su
+# fecha. Si algo aqui no tiene comando, no se ha medido: es una afirmacion.
+#
+# QUE NO ES: un informe. Los informes se archivan; esto se re-genera.
+
+meta:
+  fecha: "2026-10-10"
+  commit: "e801d4e91af713d31cd267f6898d301fdbd12c1c"
+  maquina: Windows · Python 3.12 (myenv) · Python 3.12 (dashboard/.venv)
+  regla_basetemp: "SIEMPRE fuera del arbol del repo. Dentro, test_research_cannot_trade da falso positivo."
+  commits_desde_la_auditoria_anterior: ["44f8591", "e801d4e"]
+  auditoria_anterior: "audit/ (borrada del arbol, recuperable en HEAD) · 2026-10-09 · base 32b6f8e"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SUITES DE TESTS — el denominador de todo lo demas
+# ═══════════════════════════════════════════════════════════════════════════
+suites:
+
+  - suite: bot
+    comando: 'myenv\Scripts\python.exe -m pytest tests -p no:cacheprovider -q --no-header'
+    collected: 1384
+    passed: 1381
+    failed: 3
+    skipped: 10
+    exit_code: 1
+    fecha: "2026-10-10"
+    conclusion: "ROJA. 3 fallos, todos de la misma causa (ISS-001)."
+    fallos:
+      - test: "tests/test_sweep_parallel.py::test_el_reparto_devuelve_exactamente_el_mismo_resultado"
+        causa: "bundle obsoleto inyectado en sys.path"
+        ver: ISS-001
+      - test: "tests/test_sweep_parallel.py::test_el_orden_es_el_de_entrada_y_no_el_de_finalizacion"
+        causa: "bundle obsoleto inyectado en sys.path"
+        ver: ISS-001
+      - test: "tests/test_sweep_parallel.py::test_hay_mas_de_un_proceso_de_verdad"
+        causa: "TypeError: trade_costs() got an unexpected keyword argument 'conservative'"
+        ver: ISS-001
+    aislamiento:
+      comando: 'myenv\Scripts\python.exe -m pytest tests\test_sweep_parallel.py'
+      resultado: "11/11 VERDE"
+      conclusion: "El fallo NO es del codigo de barrido: es contaminacion de sys.path por el test de Kaggle."
+    reproduccion_minima:
+      comando: 'myenv\Scripts\python.exe -m pytest tests\test_kaggle_layout.py tests\test_sweep_parallel.py'
+      resultado: "3 FAILED"
+      conclusion: "Prueba DEFINITIVA del orden: kaggle_layout envenena, sweep_parallel paga."
+    skips_de_guardianes:
+      ver: ISS-006
+      nota: >
+        Los barridos YA ESTAN en disco con n_trials=25 y el bloque reality_check
+        completo. La condicion del skip puede que ya no se cumpla.
+      tests:
+        - "tests/test_reality_check.py:538 — 'no sweep result on disk'"
+        - "tests/test_sweep_universe.py:169 — 'no sweep result on disk'"
+        - "tests/test_sweep_universe.py:376 — 'no hay resultado de barrido en este arbol'"
+        - "tests/test_shipped_signal_source.py:100 — 'no sweep-H4.json; the sweep has not been run'"
+        - "tests/test_shipped_signal_source.py:132 — 'no sweep-H4.json; the sweep has not been run'"
+
+  - suite: panel
+    comando: 'dashboard\.venv\Scripts\python.exe -m pytest dashboard\tests -p no:cacheprovider -q --no-header'
+    collected: 411
+    passed: 411
+    failed: 0
+    skipped: 0
+    exit_code: 0
+    fecha: "2026-10-10"
+    conclusion: "VERDE. La suite del panel es la parte mas solida del sistema."
+
+  - suite: lint_y_tipos
+    comando: "myenv\\Scripts\\python.exe -m ruff check . ; myenv\\Scripts\\python.exe -m mypy"
+    estado: NO_EJECUTADO
+    fecha: "2026-10-10"
+    conclusion: "Definidos en pyproject.toml, sin CI que los ejecute (ISS-012). No medidos hoy."
+
+  - suite: ci
+    estado: INEXISTENTE
+    evidencia: "Test-Path .github -> False"
+    ver: ISS-012
+
+# ═══════════════════════════════════════════════════════════════════════════
+# EVIDENCIA DE INVESTIGACION — los numeros que el sistema produce
+# ═══════════════════════════════════════════════════════════════════════════
+investigacion:
+
+  barridos:
+    - fichero: "data/research/barrido-AUDUSD-H1-entrenar-1.json"
+      simbolo: AUDUSD
+      timeframe: H1
+      tramo: "entrenar-1 (2021-06-01 .. 2024-06-01)"
+      n_trials: 25
+      ganador: "ATR_Breakout {atr_period: 14, breakout_atr: 2.25}"
+      observed_t: 2.0658
+      omega: 3.9402e-05
+      p_value: 0.6988
+      n_boot: 10000
+      metodo: "White's Reality Check; Newey-West omega, iid bootstrap"
+      veredicto: "NO SIGNIFICATIVO (p > 0.05)"
+      ver: ECO-001
+
+    - fichero: "data/research/barrido-AUDUSD-H1-entrenar-2.json"
+      simbolo: AUDUSD
+      timeframe: H1
+      tramo: "entrenar-2 (2024-06-01 .. 2026-10-08)"
+      n_trials: 25
+      ganador: "EMA_Trend_Pullback {ema_period: 40, trend_lookback: 30}"
+      observed_t: 1.2582
+      p_value: 0.9980
+      n_boot: 10000
+      veredicto: "NO SIGNIFICATIVO (p > 0.05). El mas lejos de signif de los tres."
+      ver: ECO-001
+      nota: >
+        ESTA ES LA REGLA POR DEFECTO DEL SISTEMA (config/gts.yaml:198). Su unico
+        barrido en disco da p = 0.998.
+
+    - fichero: "data/research/barrido-AUDUSD-H4-entrenar-1.json"
+      simbolo: AUDUSD
+      timeframe: H4
+      tramo: "entrenar-1 (2016-06-01 .. 2021-12-31)"
+      n_trials: 25
+      ganador: "MA_Crossover {fast_period: 10, slow_period: 150}"
+      observed_t: 2.6047
+      p_value: 0.2715
+      n_boot: 10000
+      veredicto: "NO SIGNIFICATIVO (p > 0.05)"
+      ver: ECO-001
+
+    - fichero: "data/research/barrido-*.json (barrido H4 de reglas, 2026-10-10)"
+      simbolo: XAUUSD
+      timeframe: H4
+      split: "2024-04-23"
+      conservative: true
+      resultados: "VACIO: candidatos [], supervivientes []"
+      veredicto: "Sin resultados"
+      ver: ISS-009
+      nota: >
+        Este es el unico barrido H4 de reglas, y esta vacio. La cita de
+        config/gts.yaml:186 que lo respalda apunta a data/research/sweep-H4.json,
+        que no existe.
+
+  confirmaciones:
+    - fichero: "data/research/confirmacion-AUDUSD-H4-examinar-1.json"
+      simbolo: AUDUSD
+      timeframe: H4
+      tramo: "examinar-1 (2010-01-04 .. 2016-06-01) — GASTADO"
+      pin: "AUDUSD_H4__examinar-1__9969bars__d79fa59d0.csv (sha256 d79fa59d...)"
+      regla: MA_Crossover
+      params: {fast_period: 10, slow_period: 150}
+      operaciones: 565
+      t_stat: -0.4877
+      net_profit: -0.014732
+      win_rate_pct: 38.4
+      veredicto: "refutada"
+      motivo: "beneficio neto negativo (-0.01) con 565 operaciones"
+      lectura: >
+        El unico experimento que llego a la etapa de confirmacion fue refutado, y
+        con el criterio correcto: |t| = 2.60 en el barrido, pero beneficio NEGATIVO
+        con 565 operaciones en el tramo de examen. El gate funciona.
+
+  registro_de_experimentos:
+    fichero: "data/research/registro-experimentos.json"
+    pares: 4
+    resultados: 6
+    confirmados: 0
+    fecha_lectura: "2026-10-10"
+    conclusion: >
+      CERO pares confirmados. evidencia_confirmada() devuelve vacio y el bot SE
+      NIEGA A ARRANCAR salvo --selection por CLI. El sistema esta parado por su
+      propia regla, que es el comportamiento correcto.
+    detalle:
+      - par: "EURUSD M15 / ATR_Breakout"
+        barridos: "0/25 y 0/25 sobreviven"
+        confirmacion: "refutada"
+        ensayos_declarados: 50
+      - par: "AUDUSD H1 / ATR_Breakout"
+        barridos: "0/25 sobreviven"
+        confirmacion: "no ejecutada"
+        ensayos_declarados: 150
+      - par: "AUDUSD H1 / EMA_Trend_Pullback"
+        barridos: "0/25 sobreviven"
+        confirmacion: "no ejecutada"
+      - par: "AUDUSD H4 / MA_Crossover"
+        barridos: "4/25 sobreviven"
+        confirmacion: "REFUTADA"
+      - par: "EURUSD H1 / EMA_Trend_Pullback"
+        estado: "tramos declarar, sin resultados"
+    ver: ECO-001
+
+  walkforward_modelo:
+    ficheros:
+      - "data/research/archive/walkforward-H1-modelo-medido-20261010.json"
+      - "data/research/archive/walkforward-H1-modelo-conservador-20261010.json"
+    fecha: "2026-10-10"
+    git_commit: "44f8591"
+    model_path: "checkpoints_training\\best_model.pt"
+    model_epoch: 0
+    simbolos: [EURUSD, GBPUSD, USDJPY, XAUUSD]
+    broker_declarado: exness
+    broker_presente_en_disco: false
+    ver: ISS-004
+    parametros: {lookback_bars: 100, purge_pct: 0.1, embargo_pct: 0.02, wf_train: 10000, wf_test: 2000, wf_step: 1000, train_split: 0.8, n_configurations: 1}
+    resultados:
+      - modo: medido
+        folds_totales: 148
+        folds_in_sample: 112
+        folds_out_of_sample: 28
+        operaciones_totales: 2756
+        sharpe_oos: -0.0639
+        sharpe_oos_std: 1.3634
+        sharpe_is: -0.4210
+        retorno_anual_oos: 0.0183
+        cost_drag_medio: 0.00647
+        headline: out_of_sample
+      - modo: conservador
+        folds_totales: 148
+        folds_in_sample: 112
+        folds_out_of_sample: 28
+        operaciones_totales: 2756
+        sharpe_oos: -0.0670
+        sharpe_oos_std: 1.3617
+        sharpe_is: -0.4272
+        retorno_anual_oos: 0.0179
+        cost_drag_medio: 0.00663
+    decay_check:
+      spearman_rho: 0.2057
+      p_value: 0.3032
+      n_folds: 27
+      interpretation: "NO SIGNIFICANT DECAY (model stable)"
+    lectura: >
+      El Sharpe fuera de muestra es ~0 con desviacion 1.36: la dispersion es 21
+      veces el valor. Con 28 folds, esta cifra NO distingue 'nada' de 'algo'.
+      El propio fichero confiesa que los folds OOS no lo son para este checkpoint.
+    ver: [VAL-002, ML-002, ISS-002]
+    campos_adicionales_presentes: [mc_metrics, stress_results, regime_metrics, label_quality]
+    nota_montecarlo: >
+      mc_metrics y stress_results ESTAN en el fichero. El README (linea 396) afirma
+      que nunca se han ejecutado. PENDIENTE de verificar si tienen contenido real
+      o son ceros por defecto (ver VAL-004).
+
+  piloto_de_vuelo:
+    variables:
+      purga: "barrier_calibration.py + verify_barrier_vol_k.py"
+      barrido_purgado: "purged_sweep.py + verify_purged"
+      regresion_backtest: "scripts/verify_backtest_regression.py"
+      consola_negativa: "research/control_negativo.py"
+      balance_de_etiquetas: "research/label_balance.py"
+      balance_de_predictibilidad: "research/label_predictability.py"
+      longitud_minima: "research/minimum_backtest_length.py"
+      sobreajuste: "overfit_report.py"
+      persistencia: "holdout_eval.py"
+      ablation: "ablation.py"
+      regimen: "regime.py"
+      skill: "skill_check.py"
+    conclusion: "Dominio 2 y 8 tienen una cobertura de verificacion inusualmente densa. Es la parte mas fuerte del sistema."
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ESTRUCTURA DEL CODIGO
+# ═══════════════════════════════════════════════════════════════════════════
+estructura:
+  loc_por_paquete:
+    research: 14216
+    dashboard/app: 7640
+    core: 4418
+    app: 4433
+    runtime: 2319
+    simulation: 1395
+    risk: 1490
+    indicators: 925
+    live: 923
+    mt5: 842
+    strategies: 759
+    training: 707
+    storage: 377
+    decisions: 116
+    tests: 23036
+  fecha: "2026-10-10"
+  asimetria_principal: "investigacion (14 216) = 6x el bucle que opera (2 319)"
+  ficheros_python_raiz: 8
+  modulos_research: 43
+  reglas_estrategia: 11
+  validadores_riesgo: 11
+  rutas_panel: 84
+  rutas_de_orden_en_panel: 0
+  bundle_gts_diverge_en: 13
+  bundle_gts_desfasado_por: "6h24m (09:31 vs 15:55)"
+  ver: [ML-003, ISS-001, ISS-027]
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SEGURIDAD — comprobaciones hechas con herramientas, no por lectura
+# ═══════════════════════════════════════════════════════════════════════════
+seguridad:
+  - comprobacion: "El panel no expone ninguna ruta de orden"
+    metodo: 'Select-String @app.(post|get|put|delete) en dashboard/app/main.py'
+    resultado: "84 rutas; 0 de orden. Las unicas con 'position' son GET /api/positions y POST /api/positions/flatten."
+    veredicto: CUMPLE
+  - comprobacion: "El panel no importa el bot"
+    metodo: "Analizador de imports (audit/architect, 2026-10-09, re-verificado hoy)"
+    resultado: "0 aristas de dashboard/app/* hacia app/*. El panel tiene su propio app/ en sys.path[0]."
+    veredicto: CUMPLE
+  - comprobacion: "El panel enlaza a localhost"
+    metodo: "Lectura de dashboard/app/config.py"
+    resultado: "gts_host default '127.0.0.1' (GTS_HOST)"
+    veredicto: CUMPLE
+  - comprobacion: "Ningun .env versionado"
+    metodo: "git ls-files | Select-String 'env$' ; git check-ignore -v dashboard/.env"
+    resultado: "0 .env en git. dashboard/.env -> .gitignore:20"
+    veredicto: CUMPLE
+  - comprobacion: "Las credenciales MT5 de ejemplo estan vacias"
+    metodo: "Lectura de dashboard/.env.example"
+    resultado: "MT5_LOGIN=, MT5_PASSWORD=, MT5_SERVER=, MT5_PATH= (todas vacias)"
+    veredicto: CUMPLE
+  - comprobacion: "live.enabled apagado y allow_funded apagado (dos cerrojos)"
+    metodo: "Lectura de config/gts.yaml:362-372"
+    resultado: "enabled: false, allow_funded: false"
+    veredicto: CUMPLE
+  - comprobacion: "Solo un modulo puede enviar ordenes"
+    metodo: "Select-String order_send en live/ y simulation/"
+    resultado: "order_send en live/execution.py (8), live/terminal.py (3), live/__init__.py (1), simulation/portfolio.py (1 comentario)"
+    veredicto: "CUMPLE CON MATIZ"
+    matiz: >
+      simulation/broker_book.py:66 importa live.execution a nivel de modulo. La
+      garantia descansa en una lista de prohibidos del test, no en la estructura.
+    ver: ISS-013
+  - comprobacion: "El panel puede desactivar los validadores de riesgo"
+    metodo: "Lectura de dashboard/app/main.py:2118"
+    resultado: "POST /api/features escribe features.json sin auth ni CSRF; reason es opcional"
+    veredicto: NO_CUMPLE
+    ver: ISS-003
+  - comprobacion: "El panel no escribe el heartbeat del bot"
+    metodo: "Lectura de runtime/control.py / README D-017"
+    resultado: "PanelControl no tiene publish"
+    veredicto: CUMPLE
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ESTADO OPERATIVO — lo que se sabe del sistema en ejecucion
+# ═══════════════════════════════════════════════════════════════════════════
+operacion:
+  bot_en_ejecucion: false
+  evidencia: "data/control/state.json: heartbeat 2026-10-02T18:42:05Z — 8 dias de antiguedad; el panel lo lee como 'not running'"
+  journal_bytes: 0
+  journal_lectura: "data/journal/decisions.jsonl esta VACIO. La cadena de hash nunca se ha verificado contra una sesion real."
+  ver: ISS-011
+  heartbeat_registrado: "strategy: panel_model — modo RETIRADO el 2026-10-08 (D-019). El estado en disco es pre-retirada."
+  ultima_carga_util_con_registro: "2026-10-08 (EURUSD M15) · 3 decisiones · 0 ordenes"
+  mt5_conectado_durante_esta_auditoria: false
+  razon: "Fase 1 prohibida de forma explicita: no se ejecuta ninguna operacion financiera."
+  panel_arrancado_durante_esta_auditoria: false
+  razon_panel: "Suficiente con la suite: 411/411 verdes cubren sus rutas sin MT5."
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ESTADO DE GIT
+# ═══════════════════════════════════════════════════════════════════════════
+git:
+  rama: master
+  head: e801d4e
+  fecha_head: "2026-10-10 15:51:18 -0400"
+  ficheros_modificados: 36
+  eliminaciones_preparadas: 220
+  detalle_eliminaciones: "audit/** (220 ficheros, 65 540 lineas) + brokers/exness.yaml (96 lineas)"
+  no_versionado_y_relevante:
+    - "core/costs.py, core/broker_profile.py, brokers/*.yaml fueron NO versionados en 2026-10-09 y LUEGO versionados. Hoy estan en HEAD."
+  aviso: >
+    NO ejecutar git clean ni git checkout en este arbol sin revisar: hay 220
+    eliminaciones preparadas que un checkout destruiria de forma irreversible.
+  .gitignore_cubre: ["/data/* (con excepciones)", "/gts/", "descarga/", "dashboard/.env", "colab/gts_colab_bundle.zip", "/kaggle/data/"]
+
+# ═══════════════════════════════════════════════════════════════════════════
+# LO QUE NO SE HA MEDIDO — con el motivo
+# ═══════════════════════════════════════════════════════════════════════════
+no_medido:
+  - que: "Comportamiento con MT5 conectado"
+    motivo: "Prohibido en Fase 1. Ninguna orden real, ninguna operacion financiera."
+    que_habria_que_hacer: "Arrancar el panel contra el terminal abierto y leer /health. Solo lectura."
+  - que: "Entrenamiento, barrido o walk-forward"
+    motivo: "Prohibido en Fase 1. Ninguna cifra de este informe es de una corrida hecha hoy."
+    que_habria_que_hacer: "R-003 y R-010, con autorizacion."
+  - que: "Contenido real de mc_metrics y stress_results"
+    motivo: "No inspeccionados en detalle"
+    que_habria_que_hacer: "Leer los bloques de los ficheros archive/*.json y verificar que no son ceros por defecto (VAL-004)."
+  - que: "Si portfolio_optimizer se ejecuta y aplica sus topes"
+    motivo: "H6 de la auditoria anterior quedo obsoleto al aparecer signal_value; requiere lectura mas profunda"
+    que_habria_que_hacer: "Instrumentar la rama y ver que hace (ISS-007, R-009)."
+  - que: "Que interprete usa realmente dashboard/run.py"
+    motivo: "Medido el 2026-10-09, no re-verificado hoy"
+    que_habria_que_hacer: "Arrancar el panel y leer el interprete del proceso (ISS-015)."
+  - que: "Si existe copia de seguridad de data/"
+    motivo: "El arbol no lo declara y no hay acceso a la infraestructura"
+    que_habria_que_hacer: "Preguntar al propietario (ISS-016)."
+  - que: "Rendimiento del arbol completo"
+    motivo: "No medido en navegador real ni con MT5"
+  - que: "Las cifras de la auditoria del 2026-10-09 no re-verificadas"
+    motivo: "Marcadas como 'No re-verificado' donde aplican"
+    ver: [ISS-015, INF-001, OBS-004]
