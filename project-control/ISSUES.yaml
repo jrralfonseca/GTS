@@ -1,0 +1,1001 @@
+# GTS — Problemas, deficiencias, riesgos y bloqueos
+# Revision: ffbe39f · Fecha: 2026-10-11
+#
+# CLASIFICACION (deliberadamente separate de COMPONENTS.yaml):
+#   confirmado  = reproducido o leido de un fichero, con la evidencia a la vista
+#   abierto     = la evidencia lo senala pero no se ha re-verificado hoy
+#   risque      = plausible por el diseno, NO comprobado
+#
+# El campo `confirma` dice SI o NO. Un "si" con ruta y linea es un hecho; un
+# "no" es una tarea, no un hallazgo.
+
+issues:
+
+  # ═════════════════════════ BLOQUEOS DE PRIMERA ═════════════════════════
+  - id: ISS-001
+    titulo: "El bundle de entrenamiento obsoleto rompe 3 tests de la suite del bot"
+    severidad: alta
+    confirma: si
+    componente: [ML-003, QA-001]
+    tipo: defecto_confirmado
+    resumen: >
+      El bundle gts/ (construido a las 09:31) se extrae a un directorio temporal
+      y se coloca PRIMERO en sys.path. Su copia de core/costs.py es anterior a la
+      ultima firma y no acepta el parametro `conservative`. Los procesos hijo que
+      lanza el barrido paralelo importan esa copia y fallan con
+      TypeError: trade_costs() got an unexpected keyword argument 'conservative'.
+    evidencia:
+      - "Reproduccion minima: pytest tests/test_kaggle_layout.py tests/test_sweep_parallel.py -> 3 FAILED"
+      - "Aislado: pytest tests/test_sweep_parallel.py -> 11/11 VERDE"
+      - "Suite completa: 1381 pasan, 3 fallan, exit 1"
+      - "Traza: .../pt_bot2/test_las_cuatro_velas_del_entr0/working/gts/research/sweep_parallel.py:164"
+      - "gts/core/costs.py trade_costs() NO tiene `conservative`; core/costs.py SI lo tiene"
+      - "13 ficheros del bundle divergen de la raiz (medido hoy)"
+    causa_raiz: >
+      tests/test_kaggle_layout.py::_ejecutar_con_rutas_remepeadas extrae el bundle
+      a un temporal y lo deja importable. El contamination se propaga a los tests
+      posteriores que lanzan procesos hijos (ProcessPoolExecutor en Windows).
+    por_que_importa: >
+      El fallo NO es del barrido: es del arnes. Pero un arnes que importa el codigo
+      equivocado puede hacer que un resultado de barrido sea irreproducible, y un
+      numero irreproducible no es evidencia. Ademas deja la suite en rojo, que es la
+      unica senal automatica que tiene este sistema.
+    pruebas_que_lo_fijan: "tests/test_sweep_parallel.py::{test_el_reparto_devuelve_exactamente_el_mismo_resultado, test_el_orden_es_el_de_entrada_y_no_el_de_finalizacion, test_hay_mas_de_un_proceso_de_verdad}"
+    fix_propuesto: "Reconstruir el bundle antes de la suite, o aislar el sys.path del test de Kaggle con monkeypatch.syspath_prepend + restauracion."
+    coste: bajo
+    reversibilidad: trivial
+    estado: RESUELTO
+    resuelto_por: >
+      ffbe39f: el bundle gts/ se ELIMINO del arbol (era la fuente de la
+      contaminacion) y los tests de bundle saltan con motivo cuando no existe.
+    verificado: "2026-10-11: suite completa 1379 pasan / 0 fallan / exit 0 con kaggle_layout ANTES de sweep_parallel; corrida adversa del par con exit 0."
+    siguiente_accion: "ninguna"
+
+  - id: ISS-002
+    titulo: "No existe tramo fuera de muestra: el walk-forward no puede significar lo que dice"
+    severidad: CRITICA
+    confirma: si
+    componente: [VAL-002, ML-002, ECO-001]
+    tipo: defecto_confirmado
+    resumen: >
+      create_data_loaders parte la serie en un prefijo de entrenamiento y un sufijo
+      de validacion, y nada mas. El checkpoint best_model.pt es la epoca que minimiza
+      la perdida sobre ESE sufijo. El walk-forward etiqueta como out_of_sample los
+      folds que caen ahi. Resultado: de 148 folds, 28 son tachados fuera de muestra
+      y 8 de esos son la propia validacion que eligio el epoch. El sistema entero
+      ha usado su dataset para entrenar y para elegir el checkpoint.
+    evidencia:
+      - "research/backtest_v2.py:368-371: train_pos=arange(train_size); val_pos=arange(train_size+purge_size, n_seq). No hay un tercer tramo."
+      - "El propio fichero lo confiesa: provenance.selection_note = 'el epoch del checkpoint se eligio con validacion que empieza en la fila 45010, dentro de la muestra reportada; por eso los folds llamados out-of-sample no lo son para ese checkpoint'"
+      - "scripts/_why_oos_beats_is.py: solo 12 de 148 folds (8.1%) caen en barras que el modelo no vio en ninguna capacidad"
+      - "Medido hoy en el fichero: 112 in_sample / 28 out_of_sample; Sharpe OOS -0.064 +- 1.363"
+    por_que_importa: >
+      Es el bloqueo del dominio 8 y del 18. Mientras no exista un tramo que no entre
+      ni en entrenamiento ni en seleccion de epoch, NINGUNA afirmacion sobre si el
+      modelo tiene habilidad es respondible. El Sharpe de -0,064 +- 1,363 no
+      distingue 'nada' de 'algo': la desviacion (1,36) es 21 veces el valor.
+    pruebas_que_lo_fijan: "tests/test_walkforward.py (etiqueta in_sample por fold); tests/test_scaler_fit_scope.py"
+    fix_propuesto: "Reservar un tramo final que no se use ni para entrenar ni para elegir epoch. Coste: solo la particion, sin reentrenar. La forma cara (reentrenar por fold) es la que haria que la palabra walk-forward signifique algo."
+    coste: medio
+    reversibilidad: "revertir la particion"
+    siguiente_accion: "R-003. Es la tarea que desbloquea mas dominios."
+
+  - id: ISS-003
+    titulo: "El panel puede desactivar los 11 validadores de riesgo sin autenticacion"
+    severidad: CRITICA
+    confirma: si
+    componente: [SEG-003, RISK-001]
+    tipo: defecto_confirmado
+    resumen: >
+      POST /api/features escribe data/control/features.json sin autenticacion ni
+      CSRF. Ese fichero se fusiona sobre el YAML en app/config.py, y
+      app/features.py::to_risk_limits() lo traduce a los limites que lee
+      risk/engine.py. El panel no puede COLOCAR ordenes (correcto, D-015) pero si
+      puede APAGAR los frenos que las autorizan.
+    evidencia:
+      - "dashboard/app/main.py:2118 @app.post('/api/features') -> control().write_features(features, reason=reason)"
+      - "El campo `reason` es opcional; solo se pide para features, no para limites"
+      - "risk/engine.py lee los limites fusionados"
+      - "audit/PHASE1-REPORT.md H4 lo describe como 'la direccion peligrosa'"
+    por_que_importa: >
+      El encargo del dueno es que la interfaz no adquiera permisos de trading.
+      Hoy el panel no envia ordenes, pero puede retirar las condiciones que
+      las permiten. El vector es local (127.0.0.1, sin auth), no remoto, asi que
+      el riesgo es un proceso local no autorizado, no un atacante de red.
+    pruebas_que_lo_fijan: "dashboard/tests/test_features_sin_riesgo.py (4 tests: esquema sin risk, pagina sin interruptores muertos, POST con riesgo descartado y dicho, POST solo-riesgo rechazado con el motivo)."
+    fix_propuesto: "Exigir confirmacion explicita y motivo obligatorio para tocar cualquier interruptor de riesgo; alternativamente sacar los interruptores de riesgo del alcance del panel y dejarlos solo en el YAML versionado."
+    coste: bajo
+    reversibilidad: "revertir el guardián"
+    estado: RESUELTO
+    resuelto_por: >
+      En dos pasos. (1) El bot dejo de escuchar: desde el 2026-10-10 el
+      loader descarta los bloques `risk` y `limites` del traspaso del panel,
+      con aviso al log (app/config.py). (2) El panel dejo de ofrecer
+      (reestructuracion del 2026-10-11): el esquema unico `_FEATURES_SCHEMA`
+      no lleva seccion de riesgo, la pagina lo dice con una nota que apunta
+      al YAML versionado, y `POST /api/features` descarta `risk`/`limites`
+      con respuesta explicita - o los rechaza con 422 si no queda nada que
+      escribir. Es la opcion B de R-002, la mas estricta.
+    verificado: "2026-10-11: 4/4 tests nuevos del panel; suites completas bot 1383+/0 y panel 418/418 en verde tras el cambio."
+    siguiente_accion: "ninguna"
+
+  - id: ISS-004
+    titulo: "El broker que produjo la evidencia actual esta borrado del arbol"
+    severidad: alta
+    confirma: si
+    componente: [OPS-003, RES-002]
+    tipo: trazabilidad
+    resumen: >
+      Los resultados de walk-forward del 2026-10-10 declaran broker: "exness" en su
+      bloque de procedencia. brokers/exness.yaml esta staged-deleted: existe en HEAD
+      (e801d4e) pero no en el arbol de trabajo. El perfil de costes que produjo las
+      cifras no es reconstruible desde el estado actual.
+    evidencia:
+      - "data/research/archive/walkforward-H1-modelo-medido-20261010.json -> provenance.broker = 'exness'"
+      - "Test-Path brokers/exness.yaml -> False"
+      - "git ls-files brokers/ -> solo brokers/metaquotes-demo.yaml"
+      - "git log --all -- brokers/exness.yaml -> e801d4e, c4ab485 (SI se versiono en su dia)"
+    por_que_importa: >
+      El sistema gasto dos commits persiguiendo la trazabilidad completa
+      (BacktestResult.provenance, tests/test_result_provenance.py, 7 tests). Ese
+      trabajo queda anulado en parte si el fichero que el resultado declara no esta.
+      No es una perdida de codigo: se recupera con git. Es una perdida de
+      REPRODUCIBILIDAD desde el estado de trabajo.
+    pruebas_que_lo_fijan: "tests/test_result_provenance.py verifica que el bloque existe y viaja; no verifica que el broker declarado exista en disco."
+    fix_propuesto: "Restaurar brokers/exness.yaml desde HEAD, o re-emitir los resultados con el perfil que si existe. Decidir cual de los dos perfiles es el canonico (ver R-004)."
+    coste: trivial
+    reversibilidad: trivial
+    estado: RESUELTO
+    resuelto_por: "brokers/exness.yaml restaurado y versionado en HEAD. Ademas, los walkforwards que declaraban ese broker fueron retirados por la limpieza de la nueva etapa."
+    verificado: "2026-10-11: git ls-files brokers/ -> exness.yaml + metaquotes-demo.yaml, ambos en disco."
+    siguiente_accion: "ninguna"
+
+  # ═════════════════════════ ALTA ═════════════════════════
+  - id: ISS-005
+    titulo: "El test de conformidad de costes no ejerce ninguno de los dos motores"
+    severidad: alta
+    confirma: si
+    componente: [BT-002]
+    tipo: test_vacuo
+    resumen: >
+      tests/test_cost_conformity.py se presenta como el criterio de aceptacion de
+      la conformidad entre el backtest y la simulacion. Su funcion _neto_backtest_usd()
+      calcula el bruto A MANO y llama a trade_costs. Nunca construye
+      PurgedWalkForwardBacktest, aunque lo importa en la linea 25. El unico motor que
+      lo verifica es el de la simulacion.
+    evidencia:
+      - "tests/test_cost_conformity.py:25 importa PurgedWalkForwardBacktest"
+      - "tests/test_cost_conformity.py:49-67 _neto_backtest_usd() -- no lo usa"
+      - "tests/test_cost_conformity.py:68+ _neto_simulacion_usd() -- si construye SimulatedPortfolio"
+      - "audit/PHASE1-REPORT.md H7 lo identifica como vacuo por construccion"
+    por_que_importa: >
+      El costeo unificado es el cambio mas grande de las ultimas dos semanas
+      (git log c4ab485, e801d4e). La valla que lo sostiene no lo prueba.
+    pruebas_que_lo_fijan: "test_el_mismo_trade_da_el_mismo_pnl_neto_en_ambos_motores -- pasa, pero comparando una cuenta manual contra el motor de simulacion."
+    fix_propuesto: "Que _neto_backtest_usd() ejecute una operacion a traves de PurgedWalkForwardBacktest y compare su neto con el de la simulacion."
+    coste: bajo
+    reversibilidad: trivial
+    siguiente_accion: "R-007"
+
+  - id: ISS-006
+    titulo: "Cinco guardianes de la evidencia se saltan en silencio"
+    severidad: alta
+    confirma: si
+    componente: [QA-001, RES-003]
+    tipo: cobertura
+    resumen: >
+      El unico test que ejecuta el Reality Check de punta a punta NUNCA corre, porque
+      salta con 'no sweep result on disk'. Tres tests mas de test_shipped_signal_source
+      saltan con 'the sweep has not been run'.
+    evidencia:
+      - "tests/test_reality_check.py:538 -> pytest.skip('no sweep result on disk')"
+      - "tests/test_sweep_universe.py:169 -> pytest.skip('no sweep result on disk')"
+      - "tests/test_sweep_universe.py:376 -> pytest.skip('no hay resultado de barrido en este arbol')"
+      - "tests/test_shipped_signal_source.py:100 y :132 -> pytest.skip('the sweep has not been run')"
+      - "Medido hoy: 10 skips en la suite completa, 5 de ellos son estos"
+    por_que_importa: >
+      Un skip que nadie mira es peor que un fallo. Ademas, HAY resultados de barrido
+      en disco (data/research/barrido-*.json, con n_trials=25 y el bloque reality_check
+      completo), asi que la condicion del skip puede que ya no se cumpla.
+    pruebas_que_lo_fijan: "Los propios skips."
+    fix_propuesto: "Apuntar los skips a data/research/barrido-*.json en vez de a data/research/sweep-H4.json. Si el fichero no esta, que el test FALLE, no que salte."
+    coste: bajo
+    reversibilidad: trivial
+    siguiente_accion: "R-008"
+
+  - id: ISS-007
+    titulo: "El optimizador de cartera esta declarado activo y no tiene un solo test"
+    dominio: 6
+    severidad: media
+    confirma: PARCIAL
+    componente: [PORT-001]
+    tipo: cobertura
+    resumen: >
+      config/gts.yaml declara portfolio_optimizer.enabled: true. Es el unico
+      componente de riesgo sin ninguna valla. La auditoria del 2026-10-09 (H6) lo
+      dio por roto al leer context.signal_value, campo que entonces no existia.
+      REVISADO HOY: signal_value SI existe ahora en app/decision_core.py:59, asi que
+      la premisa original es obsoleta. Lo que NO se ha verificado es si la rama se
+      ejecuta, si los topes se aplican, o si la excepcion se sigue tragando.
+    evidencia:
+      - "config/gts.yaml:431-437 enabled: true, max_portfolio_risk 0.02, max_symbol_weight 0.30"
+      - "app/decision_core.py:59 signal_value: float (EXISTE, medido hoy)"
+      - "app/decision_core.py:470 new_signal = {context.symbol: 'buy' if context.signal_value > 0 else 'sell'}"
+      - "tests/: cero referencias a portfolio_optimizer"
+    por_que_importa: >
+      Un componente declarado activo, sin test y con una excepcion capturada, es
+      indistinguible de un componente roto y de uno que funciona. No es assertion.
+    pruebas_que_lo_fijan: "NINGUNA."
+    fix_propuesto: "Un test que demuestre que cambiar max_symbol_weight cambia el resultado, mas uno que falle si la rama se traga una excepcion."
+    coste: bajo
+    reversibilidad: trivial
+    siguiente_accion: "R-009. Verificar antes de arreglar: puede que ya funcione."
+
+  - id: ISS-008
+    titulo: "El optimizador de cartera declara una propiedad que el codigo no tiene (codependence)"
+    severidad: baja
+    confirma: si
+    componente: [PORT-001]
+    tipo: divergencia
+    resumen: >
+      config/gts.yaml:433 declara codependence: 'pearson'. Esa palabra no es un
+      estandar de metodo de covarianza en ningun sitio del codigo: la clave esta en
+      ingles, el valor tambien, pero no aparece en ningun modulo. Probablemente es
+      un nombre inventado.
+    evidencia: ["config/gts.yaml:433", "grep codependence en risk/: cero coincidencias"]
+    por_que_importa: "Una clave de configuracion que nadie lee es documentacion falsa."
+    pruebas_que_lo_fijan: "NINGUNA."
+    fix_propuesto: "Borrar la clave o implementar el metodo que nombra."
+    coste: trivial
+    reversibilidad: trivial
+    siguiente_accion: "R-009 (misma tarea que ISS-007)"
+
+  # ═════════════════════════ MEDIA ═════════════════════════
+  - id: ISS-009
+    titulo: "El README afirma que la evidencia de la regla desplegada esta en un fichero que no existe"
+    severidad: alta
+    confirma: si
+    componente: [ECO-001, REQ-001]
+    tipo: trazabilidad
+    resumen: >
+      config/gts.yaml:186 justifica EMA_Trend_Pullback citando
+      data/research/sweep-H4.json. Ese fichero NO EXISTE y nunca se ha versionado.
+      Se cita en cinco sitios (gts.yaml:186, README:433, 442, 609, 642).
+      Peor: la regla por defecto opera en EURUSD H1, y el unico barrido en disco de
+      EMA_Trend_Pullback es de AUDUSD H1 con 0/25 y p=0.998. Ni el simbolo ni el
+      timeframe coinciden con ninguna evidencia existente.
+    evidencia:
+      - "Test-Path data/research/sweep-H4.json -> False"
+      - "git log --all -- data/research/sweep-H4.json -> nunca versionado"
+      - "config/gts.yaml:186 cita el fichero; README lo cita en 4 lineas"
+      - "barrido-AUDUSD-H1-entrenar-2.json: winner = EMA_Trend_Pullback, p_value = 0.998"
+      - "El H4 que SI existe es AUDUSD barriendo MA_Crossover, y su confirmacion lo REFUTO (t = -0.488)"
+      - "El unico barrido H4 en disco esta VACIO: data/research/archive/walkforward-H4-rules-20261010.json -> results: {candidatos: [], supervivientes: []}"
+    por_que_importa: >
+      Es la unica regla que gobierna el sistema y su justificacion escrita apunta al
+      vacio. Un archivo de arquitectura que cita evidencia inexistente es peor que
+      uno que no cita evidencia.
+    pruebas_que_lo_fijan: "tests/test_shipped_signal_source.py tiene el test test_the_evidence_timeframe_is_not_the_running_timeframe, pero SALTA porque el fichero no existe (ver ISS-006)."
+    fix_propuesto: "Retirar las 5 citas y reescribir la justificacion con lo que SI esta medido (los tres p-valores, todos > 0.05), o generar el fichero. La segunda opcion no cambia el resultado, porque el barrido ya se hizo en H1 y fallo."
+    coste: bajo
+    reversibilidad: trivial
+    siguiente_accion: "R-010"
+
+  - id: ISS-010
+    titulo: "El walk-forward no reentrena por fold"
+    severidad: alta
+    confirma: si
+    componente: [VAL-002]
+    tipo: defecto_confirmado
+    resumen: >
+      _walkforward_validate desempaqueta train_idx y nunca lo usa: solo construye
+      secuencias de test y predice. El checkpoint se carga UNA vez y se evalua sobre
+      la serie entera. El modelo no se adapta a cada fold, que es lo que hace que la
+      palabra walk-forward signifique algo.
+    evidencia:
+      - "research/backtest_v2.py:898 _walkforward_validate: train_idx se desempaqueta y no se usa (aparece en 2 lineas: la del desempaquetado y la del log)"
+      - "scripts/walkforward_eval.py:156 el checkpoint se carga una vez"
+      - "Medido: 112 de 148 folds caen dentro del tramo de entrenamiento"
+    por_que_importa: >
+      El bug walk-forward-not-retrained lleva abierto desde 2026-10-03. PARCIAL: lo
+      que se hizo fue separar las dos poblaciones en el agregado y declarar
+      headline: out_of_sample, no conseguir un walk-forward de verdad. Dejar de
+      mezclar dos numeros no es lo mismo que tener un numero valido.
+    pruebas_que_lo_fijan: "tests/test_walkforward.py verifica la ETIQUETA, no el reentrenamiento."
+    fix_propuesto: "Barato: reportar solo los folds cuyo test empieza despues del corte. Caro: reentrenar por fold. El barato ya esta hecho; el caro es R-003."
+    coste: "barato: hecho / caro: alto"
+    reversibilidad: "revertir la particion"
+    siguiente_accion: "Depende de ISS-002"
+
+  - id: ISS-011
+    titulo: "El journal esta vacio: la cadena de hash nunca se ha verificado contra una sesion real"
+    severidad: media
+    confirma: si
+    componente: [ACC-002]
+    tipo: cobertura
+    resumen: >
+      data/journal/decisions.jsonl tiene 0 bytes. El test verifica el contrato
+      (que una entrada alterada rompe la cadena) sobre entradas sinteticas. Nunca
+      se ha comprobado contra una sesion real del bot.
+    evidencia:
+      - "data/journal/decisions.jsonl = 0 bytes (medido hoy)"
+      - "data/control/state.json: heartbeat 2026-10-02T18:42:05Z, decisions: 3, orders: 0, strategy: panel_model (obsoleto)"
+      - "tests/test_journal_contract.py verde sobre entradas construidas"
+    por_que_importa: >
+      El journal es el unico registro de lo que el bot decidio y por que. Sin una
+      sesion real, su cadena de hash es una propiedad del codigo, no del sistema.
+    pruebas_que_lo_fijan: "tests/test_journal_contract.py"
+    fix_propuesto: "Una sesion real del bot (simulada, live.enabled=false) con el journal encendido, y verificar la cadena sobre el fichero resultante."
+    coste: bajo
+    reversibilidad: trivial
+    siguiente_accion: "R-011"
+
+  - id: ISS-012
+    titulo: "No hay integracion continua: nada ejecuta la suite automaticamente"
+    severidad: alta
+    confirma: si
+    componente: [INF-002, QA-003]
+    tipo: infraestructura
+    resumen: >
+      No existe .github ni ningun pipeline. pyproject define pytest, mypy y ruff,
+      pero nada los corre automaticamente. Los 3 fallos de ISS-01 llegaron a HEAD
+      porque no habia una puerta.
+    evidencia:
+      - "Test-Path .github -> False (medido hoy)"
+      - "pyproject.toml define las tres herramientas, sin runner"
+      - "README memory-graph 2026-10-07: 'No ha acabado de correr el lint final post-sesion'"
+    por_que_importa: >
+      Todo lo demas de este mapa (las vallas, los invariantes, las puertas) depende
+      de que alguien las ejecute. Hoy las ejecuta una persona, y por eso 3 fallos
+      convivieron con el codigo sin que nadie los viera.
+    pruebas_que_lo_fijan: "n/a"
+    fix_propuesto: "Un workflow minimo: pytest (ambos suites) + ruff + mypy, en cada push."
+    coste: bajo
+    reversibilidad: trivial
+    siguiente_accion: "R-006"
+
+  - id: ISS-013
+    titulo: "La simulacion importa el modulo de ejecucion real a nivel de modulo"
+    severidad: media
+    confirma: si
+    componente: [MT5-002]
+    tipo: acoplamiento
+    resumen: >
+      simulation/broker_book.py:66 importa live.execution a nivel de modulo. El
+      unico test que verifica que solo UN modulo puede escribir ordenes lo hace
+      con una LISTA DE PROHIBIDOS, y esa lista no incluye live.execution.
+    evidencia:
+      - "simulation/broker_book.py:66 importa live.execution"
+      - "tests/test_no_order_path.py — la lista de prohibidos no lo incluye"
+      - "audit/PHASE1-REPORT.md D5 lo identifica"
+    por_que_importa: >
+      La garantia 'solo el modulo live envia ordenes' descansa en una lista escrita a
+      mano, no en la estructura del grafo. Un modulo nuevo que importe live pasaria
+      el test si no esta en la lista.
+    pruebas_que_lo_fijan: "tests/test_no_order_path.py"
+    fix_propuesto: "Anadir live.execution a la lista, o invertir el test: que enumere los que SI pueden y niegue el resto."
+    coste: trivial
+    reversibilidad: trivial
+    siguiente_accion: "R-012"
+
+  - id: ISS-014
+    titulo: "El optimizador de cartera no tiene pruebas y el unico guardián de confirmacion tampoco es completo"
+    severidad: media
+    confirma: si
+    componente: [QA-001]
+    tipo: cobertura
+    resumen: >
+      Cobertura desigual: 1384 tests para 14 216 LOC de investigacion y 2 319 de
+      runtime, pero cero para portfolio_optimizer y cinco guardianes de evidencia
+      en skip.
+    evidencia: ["tests/: 23 036 LOC", "research/: 14 216 LOC", "0 tests para risk/portfolio_optimizer.py"]
+    por_que_importa: "El numero de tests es alto; lo que falta es donde mas duele."
+    pruebas_que_lo_fijan: "n/a"
+    fix_propuesto: "Ver R-009 y R-008."
+    coste: bajo
+    reversibilidad: trivial
+    siguiente_accion: "cubierto por R-008 y R-009"
+
+  # ═════════════════════════ RIESGOS NO CONFIRMADOS ═════════════════════════
+  - id: ISS-015
+    titulo: "El panel arranca bajo el interprete equivocado"
+    severidad: media
+    confirma: no
+    componente: [INF-001]
+    tipo: riesgo
+    resumen: >
+      dashboard/run.py se re-ejecuta bajo myenv (FastAPI 0.142.4 / uvicorn 2.13.5 /
+      Jinja2 3.1.6) mientras dashboard/requirements.txt fija OTRAS versiones
+      (0.111.0 / 2.7.4 / 3.1.4) y dashboard/.venv tiene las terceras. Ademas
+      dashboard/.venv no puede importar sklearn y su editable-install de gts apunta
+      a una ruta muerta.
+    evidencia: ["audit/PHASE1-REPORT.md seccion 2.1 (medido 2026-10-09 16:19)"]
+    por_que_importa: >
+      El panel funciona (411/411 verdes con SU venv), pero un re-ejecucion bajo
+      myenv podria cargar versiones que nadie ha probado juntas.
+    pruebas_que_lo_fijan: "NINGUNA. Es un riesgo de arranque, no de logica."
+    fix_propuesto: "Verificar que el re-ejecucion apunta a dashboard/.venv, o fijar las versiones para que las tres coincidan."
+    coste: bajo
+    reversibilidad: trivial
+    siguiente_accion: "R-013. Verificar antes de tocar: puede que ya este arreglado."
+    nota: "NO RE-VERIFICADO el 2026-10-10. Medido el 2026-10-09."
+
+  - id: ISS-016
+    titulo: "Sin copia de seguridad de data/ ni de los resultados de barrido"
+    severidad: media
+    confirma: no
+    componente: [OPS-003]
+    tipo: riesgo
+    resumen: >
+      data/ esta en .gitignore (/data/*, con excepciones para los README y el
+      directorio control). Ni data/raw/ ni data/research/ tienen backup declarado.
+      Los ficheros walkforward_results*.json de la raiz (363 MB) no tienen
+      procedencia.
+    evidencia:
+      - ".gitignore:37-45 /data/* con excepciones solo para README.md y control/"
+      - "git ls-files data/ -> solo los README"
+      - "bug no-training-history: cada corrida sobrescribe el checkpoint anterior"
+    por_que_importa: >
+      El sistema sabe declarar la procedencia de un resultado, pero el soporte fisico
+      de esa evidencia no esta en ningun sitio versionado.
+    pruebas_que_lo_fijan: "n/a"
+    fix_propuesto: "Decision del propietario sobre donde vive la evidencia (ver R-005). Es una decision de coste, no tecnica."
+    coste: "por decidir"
+    reversibilidad: n/a
+    siguiente_accion: "R-005"
+    nota: "NO VERIFICADO si existe una copia externa. El arbol no lo declara."
+
+  - id: ISS-017
+    titulo: "No hay recuperacion probada: nadie ha matado el bot y lo ha relanzado"
+    severidad: media
+    confirma: no
+    componente: [OPS-002]
+    tipo: riesgo
+    resumen: >
+      Hay reconciliacion, lock de instancia y manejo de excepciones, y todo tiene
+      test. No hay evidencia de que el sistema sobreviva a un kill -9 con una
+      posicion abierta.
+    evidencia:
+      - "app/main.py:699 reconcilia antes de actuar"
+      - "tests/test_reconcile.py, tests/test_instance_lock.py verdes"
+    por_que_importa: >
+      Los tests de reconciliacion usan posiciones sinteticas. Un kill real deja
+      estado que ninguna suite Sintetica reproduce.
+    pruebas_que_lo_fijan: "tests/test_reconcile.py (sintetico)"
+    fix_propuesto: "Prueba de supervivencia con el bot corriendo en simulacion: matar, relanzar, comprobar que reconcilia y que el lock no bloquea."
+    coste: bajo
+    reversibilidad: trivial
+    siguiente_accion: "R-014"
+
+  # ═════════════════════════ DEUDA DOCUMENTAL ═════════════════════════
+  - id: ISS-018
+    titulo: "El README afirma que no hay correccion por pruebas multiples; ya la hay"
+    severidad: media
+    confirma: si
+    componente: [ECO-001]
+    tipo: divergencia
+    resumen: >
+      README.md:906 (no-transaction-cost-model) y :910 (no-multiple-testing-correction)
+      describen huecos que el codigo ya cerro. El barrido corre el Reality Check de
+      White en cada corrida, calibrado y verificado con 33 tests, y el modelo de
+      costes esta unificado con dos modos. El README mantiene ambos como abiertos.
+    evidencia:
+      - "README.md:906 'Ningun numero del backtest descuenta costes de transaccion'"
+      - "README.md:392 dice que el barrido corrige (una seccion lo dice, otra no)"
+      - "research/sweep.py escribe n_trials, configurations y trade_returns_b; llama al test"
+      - "core/costs.py con dos modos (medido y conservador); los barridos del 10-10 traen cost_drag"
+    por_que_importa: >
+      Un README que declara cerrado lo que esta abierto (y al reves) hace que
+      cualquiera que llegue tarde tome la decision equivocada. El README tiene las dos
+      afirmaciones sobre la misma correccion, en secciones distintas.
+    pruebas_que_lo_fijan: "tests/test_reality_check.py (33), tests/test_cost_conformity.py"
+    fix_propuesto: "Reescribir las secciones de 'Huecos de validez' del README contra el estado medido. Este mapa (COMPONENTS.yaml) es la referencia; el README deberia ser el indice legible."
+    coste: bajo
+    reversibilidad: trivial
+    siguiente_accion: "R-010 (misma tarea que ISS-009)"
+
+  - id: ISS-019
+    titulo: "El stack web no esta documentado donde lo buscara quien llegue"
+    severidad: baja
+    confirma: si
+    componente: [QA-004, INF-001]
+    tipo: documentacion
+    resumen: >
+      README.md documenta la arquitectura de dos procesos y el contrato del canal,
+      pero no el stack (FastAPI + Jinja2 + HTMX + Bootstrap 5.3) ni por que se eligio.
+    evidencia: ["README.md:246-263 documenta 'la pagina es un contrato' pero no el stack", "bug web-stack-undocumented abierto desde 2026-10-03"]
+    pruebas_que_lo_fijan: "n/a"
+    fix_propuesto: "SYSTEM_MAP.md cubre ahora la arquitectura; falta la justificacion del stack."
+    coste: trivial
+    reversibilidad: trivial
+    siguiente_accion: "R-015"
+
+  - id: ISS-020
+    titulo: "La carpeta audit/ (7 informes, 65 540 lineas) esta borrada y no se ha restaurado"
+    severidad: baja
+    confirma: si
+    componente: [QA-004]
+    tipo: gobernanza
+    resumen: >
+      220 ficheros de la auditoria Fase 1 del 2026-10-09 estan staged-deleted.
+      Recuperables con git show HEAD:audit/<dominio>/<fichero>.md. Esta auditoria no
+      ha restaurado nada: es una decision del propietario.
+    evidencia:
+      - "git status --porcelain -> 220 lineas 'D  audit/...'"
+      - "git show HEAD:audit/PHASE1-REPORT.md -> 7 informes de dominio"
+    por_que_importa: >
+      Los informes contienen evidencia que sigue siendo valida (H1 y H6 los he
+      re-verificado hoy y los he marcado como obsoletos donde lo son). Restaurarlos
+      sin revisarlos seria resucitar conclusiones caducadas.
+    pruebas_que_lo_fijan: "n/a"
+    fix_propuesto: "Decidir: restaurar, archivar por tag, o dejar en el historial. Si se restauran, marcar explicitamente los hallazgos re-verificados HOY (H1 cerrado, H6 parcial)."
+    coste: trivial
+    reversibilidad: trivial
+    siguiente_accion: "R-016"
+
+  # ═════════════════════════ RIESGOS DE DISENO ═════════════════════════
+  - id: ISS-021
+    titulo: "El ciclo app <-> runtime es duro y contradice la documentacion"
+    severidad: media
+    confirma: si
+    componente: [CTL-001, INF-001]
+    tipo: arquitectura
+    resumen: >
+      app/main.py:36-44 declara 'the dependency graph is a tree'. runtime/loop.py:49
+      importa app.decision_core, lo que crea un ciclo duro app <-> runtime. Hay
+      ademas 8 aristas del bot hacia research/, que es el instrumento, no una capa.
+    evidencia: ["audit/PHASE1-REPORT.md D1 y D2 (medido 2026-10-09)", "app/main.py:36-44", "runtime/loop.py:49"]
+    por_que_importa: >
+      Un ciclo entre la raiz de composicion y el bucle es la razon por la que
+      'app wires them' no se puede sostener, y por la que un test de import puede
+      romper sin que nadie entienda por que.
+    pruebas_que_lo_fijan: "n/a"
+    fix_propuesto: "Documentar el grafo real en vez de prometer un arbol. Este mapa lo hace; falta corregir el docstring."
+    coste: trivial
+    reversibilidad: trivial
+    siguiente_accion: "R-017"
+
+  - id: ISS-022
+    titulo: "El panel muestra el riesgo que ya calcula y no lo pinta"
+    severidad: media
+    confirma: PARCIAL
+    componente: [OBS-003]
+    tipo: cobertura
+    resumen: >
+      drawdown, sharpe, winrate, expectancy se calculan y ninguna plantilla los
+      muestra. custom.css:896 define .model-provenance sin markup que lo use.
+    evidencia:
+      - "audit/PHASE1-REPORT.md H8: 6/1/5 apariciones en *.py, 0 en *.html (medido 2026-10-09)"
+      - "dashboard/static/css/custom.css:896"
+    por_que_importa: >
+      El operador mira un panel que no le dice como va el riesgo. Es trabajo de
+      plantilla, no de logica de trading.
+    pruebas_que_lo_fijan: "dashboard/tests/test_metricas_journal.py (7) + test_como_va_metricas.py (3)"
+    fix_propuesto: "Pintar la procedencia del checkpoint y las metricas ya calculadas, cada una con su fuente y su N."
+    coste: bajo
+    reversibilidad: trivial
+    estado: RESUELTO
+    resuelto_por: >
+      R-012 ejecutado el 2026-10-11 sobre las fuentes REALES de esta etapa
+      (los endpoints de learning que las calculaban murieron con la poda):
+      metricas del journal operativo (dashboard/metricas.py) - win rate,
+      expectancy, neto, drawdown y Sharpe por operacion - pintadas en la
+      pagina del bot, cada una con su N, con insignia de muestra
+      insuficiente (N<10) y con el estado 'journal vacio' honesto. La
+      procedencia del checkpoint pintada en la tarjeta de entrenamiento y
+      en la fila 'checkpoint' de la fuente de senal, cacheada por (ruta,
+      mtime). De paso se corrigio una deriva de clave: el aviso
+      'el panel sigue usando otro' usaba checkpoint.sin_recargar y el
+      contexto produce 'desfase', asi que el aviso nunca podia dispararse.
+    verificado: "2026-10-11: 10 tests nuevos; suite del panel 428/428, exit 0."
+    siguiente_accion: "ninguna"
+
+  - id: ISS-023
+    titulo: "El sistema no tiene alertas"
+    severidad: alta
+    confirma: no
+    componente: [OBS-004]
+    tipo: ausencia
+    resumen: >
+      No hay ningun mecanismo de alerta. El panel degrada visiblemente cuando el
+      disco esta critico o el journal no escribe, pero eso exige que alguien mire el
+      panel. Si el bot esta parado a las 3 de la mañana, nadie se entera.
+    evidencia: ["audit/PHASE1-REPORT.md H8: 'Alertas: ninguna, en ningun sitio' (medido 2026-10-09)"]
+    por_que_importa: >
+      Es el hueco mas grande de observabilidad que queda, y el mas barato de cerrar
+      en cuanto se decida el canal.
+    pruebas_que_lo_fijan: "dashboard/tests/test_alertas.py (17: los cinco avisos, deduplicacion por transicion, reaviso tras ventana, envio fallido reintentado, recolector que peta no mata al supervisor, httpx simulado)"
+    fix_propuesto: "Elegir canal (correo, webhook, fichero de watchdog) y avisar de: bot parado, heartbeat rancio, disco critico, journal sin escribir, y divergencia entre pending y running en /api/features."
+    coste: bajo
+    reversibilidad: trivial
+    estado: RESUELTO
+    resuelto_por: >
+      R-013 ejecutado el 2026-10-11, canal decidido por el dueno: Telegram.
+      dashboard/alertas.py (EnviarTelegram con reintentos de espera creciente
+      que jamas lanza; SupervisorAvisos con deduplicacion por transicion,
+      reaviso de mal persistente tras ventana, y cola de fallidos que se
+      reintenta) + app/main.py (_recolectar_estado_de_alertas con los cinco
+      estados, y el hilo supervisor independiente arrancado en el lifespan,
+      daemon, un minuto por sondeo). Credenciales SOLO en dashboard/.env.
+    verificado: >
+      2026-10-11: 17/17 tests con canal simulado; suite del panel 445/445.
+      Y LA EVIDENCIA REAL: aviso de prueba entregado por Telegram (HTTP
+      200 de sendMessage con 'python -m prueba_de_alerta') y CONFIRMADO
+      POR EL DUENO en su movil el mismo dia. El canal existe de punta a
+      punta. Con el panel corriendo, el supervisor queda activo con las
+      credenciales ya en .env.
+    siguiente_accion: "ninguna; recomendacion pendiente de rotar el token (transito por el chat de configuracion)"
+
+  - id: ISS-035
+    titulo: "El detector de barras en formacion comparaba el reloj del broker contra el de la maquina"
+    severidad: alta
+    confirma: si
+    componente: [FEED-001, MARKET-001]
+    tipo: defecto_confirmado
+    resumen: >
+      MT5 devuelve los timestamps de las barras en HORA DEL SERVIDOR del
+      broker (EEST = UTC+3 en MetaQuotes-Demo), codificada como si fuera
+      UTC. El detector de barras en formacion del adaptador
+      (mt5_feed.py) comparaba esos timestamps contra el reloj LOCAL
+      de la maquina (UTC de verdad). Resultado medido: 3 horas de desfase,
+      TODA barra de las ultimas 3 horas clasificada como "en formacion"
+      aunque llevara cerrada media hora.
+    evidencia:
+      - "Diagnostico directo: reloj local 22:37 UTC vs broker 01:41 UTC (diferencia 3h04m)"
+      - "10 barras M5 del broker: cerrada_hace -8229 a -10929 segundos (negativo = 'en el futuro' segun el reloj local)"
+      - "SHADOW anterior funciono porque las barras H1 del viernes estaban tan lejos (46h) que el desfase no las afecto: el bug solo aparece con barras recientes"
+    fix_aplicado: >
+      `_reloj_del_broker()` en el adaptador usa `terminal.server_time()`
+      para el control de barras en formacion. Fallback al reloj local si
+      el broker no responde.
+    verificado: >
+      2026-10-11: 3 tests nuevos (test_reloj_del_broker.py); suite bot
+      1463/0/79 exit 0; POLLING EN VIVO contra MT5 real 13/13 exit 0.
+    coste: bajo
+    reversibilidad: trivial
+    estado: RESUELTO
+    siguiente_accion: "ninguna"
+    detectado_en: "2026-10-11, SHADOW y polling contra MT5 real con el mercado recien abierto"
+
+  - id: ISS-024
+    titulo: "El filtro de niveles del visor de logs no funciona en los logs del bot"
+    severidad: baja
+    confirma: si
+    componente: [OBS-002]
+    tipo: defecto_confirmado
+    resumen: >
+      El filtro busca ' - NIVEL - ', que es el formato de panel.log. El training
+      escribe 'INFO __main__', el walkforward 'INFO' sin guiones, el launcher crudo.
+      Con el filtro activo, CERO lineas casan y la vista queda vacia, que se lee
+      como 'log vacio' cuando esta lleno.
+    evidencia:
+      - "memory-graph.jsonl, entidad panel: 'con filtro activo CERO lineas casan y la vista queda vacia, que se lee como log vacio cuando esta lleno'"
+      - "dashboard/app/main.py LOG_SOURCES tiene 5 entradas (medido hoy)"
+    por_que_importa: >
+      Un filtro que parece funcionar y no filtra es peor que no tener filtro. El
+      sistema lo resolvio con honestidad: los logs del bot traen un aviso que explica
+      por que no tienen filtro.
+    pruebas_que_lo_fijan: "dashboard/tests/test_logs_multifichero.py (12) — la clave es que los del bot NO traen el formulario de niveles"
+    fix_propuesto: "Ninguno necesario: la solucion honesta ya esta. Documentarla para que no se 'arregle'."
+    coste: trivial
+    reversibilidad: trivial
+    siguiente_accion: "Ninguna. Es una nota para el que llegue."
+
+  - id: ISS-025
+    titulo: "La clave 'training' del visor apunta a un log que el entrenamiento ya no escribe"
+    severidad: baja
+    confirma: si
+    componente: [OBS-002]
+    tipo: trazabilidad
+    resumen: >
+      LOG_SOURCES apunta 'training' a data/logs/training.log (10-08) mientras el
+      ultimo entrenamiento escribio en data/control/training_run.log (10-09).
+    evidencia: ["data/logs/training.log = 566 KB, fecha 10-08", "data/control/training_run.log = 10-09 12:03→16:23"]
+    por_que_importa: "El operador ve un log de entrenamiento viejo y cree que es el actual."
+    pruebas_que_lo_fijan: "NINGUNA sobre la ruta concreta."
+    fix_propuesto: "Apuntar la clave al fichero que el entrenamiento escribe de verdad, o unificar la ruta."
+    coste: trivial
+    reversibilidad: trivial
+    estado: RESUELTO
+    resuelto_por: >
+      Obsoleto por la limpieza de la nueva etapa, verificado el 2026-10-11:
+      el lanzador del panel redirige stdout/stderr del entrenamiento a
+      data/logs/training.log (dashboard/app/main.py:6201) - exactamente la
+      ruta que LOG_SOURCES lee. El training_run.log de la sesion manual del
+      10-09 fue retirado con la limpieza; el unico escritor vigente y el
+      visor ya coinciden.
+    verificado: "2026-10-11: TRAINING_LOG_FILE == LOG_SOURCES['training'] leido en el codigo."
+    siguiente_accion: "ninguna"
+
+  - id: ISS-028
+    titulo: "Los endpoints /api/learning del panel fallan siempre con ModuleNotFoundError"
+    severidad: media
+    confirma: si
+    componente: [SEG-002, OBS-001]
+    tipo: defecto_confirmado
+    resumen: >
+      dashboard/app/main.py hace `from app.learning import LearningLoop` en las lineas
+      1861 y 1946. El panel NO tiene learning.py; el bot si. Bajo D-017 esa
+      importacion no deberia existir: el panel tendria su propio espejo o la
+      funcionalidad deberia estar fuera de su alcance.
+    evidencia:
+      - "Resolucion real con el interprete del panel: 'app' resuelve a dashboard/app/__init__.py; app.learning -> ModuleNotFoundError"
+      - "De 9 aristas dashboard -> app, 8 resuelven al panel (config, schemas, mt5_engine, inference) y UNA esta rota"
+      - "Los dos endpoints afectados: GET /api/learning/report y POST /api/learning/run"
+      - "No hay try/except: el error es un 500, no un mensaje honesto"
+    por_que_importa: >
+      Es la unica excepcion real a D-017, y es la clase de defecto que D-017 existe
+      para evitar: el panel tocando codigo del bot sin poder importarlo.
+    pruebas_que_lo_fijan: "NINGUNA. Los 411 tests del panel pasan porque ningun test llama a /api/learning/*."
+    fix_propuesto: "Decidir si el aprendizaje entra en el panel (y entonces hacer un espejo, como control_channel) o si sale de su alcance (y los endpoints devuelven 501 con un motivo)."
+    coste: bajo
+    reversibilidad: trivial
+    siguiente_accion: "R-017"
+    detectado_en: "Propuesta arquitectonica 2026-10-10"
+
+  - id: ISS-029
+    titulo: "66 lineas de codigo muerto en runtime/loop.py que duplican la ejecucion de una operacion"
+    severidad: media
+    confirma: si
+    componente: [CTL-001]
+    tipo: codigo_muerto
+    resumen: >
+      TradingLoop._act esta definido DOS veces: lineas 916-981 y 1064-1120. Python
+      conserva la ultima definicion, asi que las 66 lineas de la primera son
+      INALCANZABLES. Medido: 11 de sus 12 sentencias son identicas a la version
+      viva.
+    evidencia:
+      - "runtime/loop.py:916 TradingLoop._act (lineas 916-981)"
+      - "runtime/loop.py:1064 TradingLoop._act (lineas 1064-1120), docstring: 'kept for test compatibility'"
+      - "Analisis AST: 11 de 12 sentencias identicas en la misma posicion"
+      - "Su unico miembro de portfolio es self.portfolios (plural), que ningun guardian filtra"
+    por_que_importa: >
+      Es la logica que EJECUTA una operacion, duplicada y muerta. Un programador
+      que lea la primera creera que es la que corre, y la modificara creyendo que
+      tiene efecto. La segunda dice 'la logica real esta en DecisionCore._act', lo
+      cual hace la primera mas superfluousa, no mas necesaria.
+    pruebas_que_lo_fijan: "NINGUNA que detecte la duplicacion. El guardian de test_broker_book.py deriva su contrato del AST pero ninguna de las dos _act toca self.portfolio (singular), asi que no las ve."
+    fix_propuesto: "Borrar las lineas 916-981 DESPUES de extraer el caso de uso ManagePosition. Antes de borrar, comprobar la suite en verde con la primera intacta."
+    coste: trivial
+    reversibilidad: trivial
+    siguiente_accion: "Fase 3 de la propuesta arquitectonica"
+    detectado_en: "Propuesta arquitectonica 2026-10-10"
+
+  # ═════════════════════════ VIGILADOS, SIN ACCION ═════════════════════════
+  - id: ISS-026
+    titulo: "El barrido en paralelo se prueba con un solo hilo por proceso, pero la paridad se exige bit a bit"
+    severidad: baja
+    confirma: si
+    componente: [RES-002]
+    tipo: riesgo
+    resumen: >
+      El test de paridad exige que el reparto entre procesos de EXACTAMENTE los
+      mismos numeros que en serie. Ese test es de los 3 que falla por ISS-01, asi
+      que hoy la paridad NO esta verificada en la suite completa (aunque si aislada).
+    evidencia: ["tests/test_sweep_parallel.py::test_el_reparto_devuelve_exactamente_el_mismo_resultado — PASA aislado, FALLA en suite completa"]
+    por_que_importa: "Un paralelismo que cambia un numero se lee como evidencia. La valla existe; el fallo es del arnes."
+    pruebas_que_lo_fijan: "los 3 tests de ISS-001"
+    fix_propuesto: "Resolver ISS-01."
+    coste: trivial
+    reversibilidad: trivial
+    estado: RESUELTO
+    verificado: "2026-10-11: dentro de la suite completa, test_el_reparto... y test_hay_mas_de_un_proceso PASAN (con duraciones visibles en el reporte); corrida adversa del par con exit 0."
+    siguiente_accion: "ninguna"
+
+  - id: ISS-027
+    titulo: "El bundle en gts/ esta 6h24m por detras de la raiz y nadie lo regenera al hacer commit"
+    severidad: baja
+    confirma: si
+    componente: [ML-003]
+    tipo: divergencia
+    resumen: >
+      gts/BUNDLE_VERSION.txt dice 'commit 44f8591'. La raiz tiene 13 ficheros
+      divergentes, todos mas nuevos (15:55 vs 09:31 del 2026-10-10). El bundle es
+      la entrada a Kaggle/Colab, asi que un entrenamiento remoto puede estar usando
+      codigo de hace seis horas.
+    evidencia:
+      - "13 ficheros divergentes: core/costs.py, core/broker_profile.py, core/model_manifest.py, research/{ablation,backtest_v2,confirmacion,experimento,regime,replay,replay_runner,sweep,sweep_parallel,walkforward}.py"
+      - "gts/ esta en .gitignore:100 (/gts/)"
+      - "root core/costs.py mtime 15:55 > gts/core/costs.py mtime 09:31"
+    por_que_importa: >
+      Es la causa raiz de ISS-001 y ademas un riesgo de reproducibilidad para el
+      entrenamiento remoto.
+    pruebas_que_lo_fijan: "tests/test_colab_bundle.py, tests/test_kaggle_layout.py"
+    fix_propuesto: "Regenerar el bundle como parte del commit, o que la suite verifique que el bundle corresponde al commit actual."
+    coste: bajo
+    reversibilidad: trivial
+    estado: RESUELTO
+    resuelto_por: "El bundle gts/ se elimino del arbol. Los tests del bundle saltan con motivo declarado cuando no existe (ffbe39f)."
+    verificado: "2026-10-11: Test-Path gts -> False; 36 saltos con motivo entre colab_bundle y kaggle_layout."
+    siguiente_accion: "ninguna"
+
+  # ═════════════════════════ NUEVOS DE LA VERIFICACION DEL 11-10 ═════════════════════════
+  - id: ISS-030
+    titulo: "Una cache de numba corrupta congela la importacion de research.labeling indefinidamente"
+    severidad: alta
+    confirma: si
+    componente: [QA-001]
+    tipo: infraestructura_del_arness
+    resumen: >
+      research/__pycache__ contenia artefactos de compilacion de numba
+      (labeling._apply_triple_barrier_numba-93.py312.*.nbc y .nbi, escritos el
+      2026-10-10 20:50) que congelaban la importacion de research.labeling:
+      CPU al 100% en un nucleo, sin error, sin progreso, por tiempo
+      indefinido. Tres corridas de la suite ardieron >60 min cada una sin
+      llegar a ningun test. El mismo labeling.py con cache virgen importa en
+      1.02 s.
+    evidencia:
+      - "Tres corridas detenidas en el segundo modulo de test, sin basetemp creado, con un nucleo al 100%"
+      - "Copia con cache virgen: 1.02 s; original: bloqueo indefinido"
+      - "Cache regenerada verificada sana: un segundo proceso importa contra ella en 1.27 s"
+      - "Backup de la cache corrupta: %TEMP%\\gts-numba-cache-backup (nada se borro)"
+    por_que_importa: >
+      El sintoma se lee como 'la suite es lenta' y quema horas sin mostrar
+      ningun error. Es el tipo de fallo del arnes que desarma la unica senal
+      automatica del sistema.
+    fix_aplicado: "Cuarentena de los 3 ficheros y regeneracion verificada. Leccion registrada en EVIDENCE.yaml suites[bot]."
+    coste: trivial
+    reversibilidad: trivial
+    siguiente_accion: "ninguna; la cache regenerada queda en su sitio"
+    detectado_en: "2026-10-11, durante la confirmacion de la regresion del cableado"
+
+  - id: ISS-031
+    titulo: "Un test del panel exige el registro de experimentos que la limpieza retiro"
+    severidad: media
+    confirma: si
+    componente: [QA-001, OBS-003]
+    tipo: test_que_depende_de_un_artefacto_retirado
+    resumen: >
+      dashboard/tests/test_dos_caminos_un_dato.py::test_una_ficha_que_no_recibe_
+      sus_datos_cae_en_la_rama_del_olvido exige al menos un par en
+      data/research/registro-experimentos.json y falla duro si no lo hay. La
+      limpieza de la nueva etapa retiro ese fichero; los tests del bot
+      recibieron el tratamiento de ffbe39f (saltar con motivo cuando el
+      artefacto falta) pero este no.
+    evidencia:
+      - "2026-10-11: suite panel 410 pasan / 1 falla / exit 1, con data/research/ vacio"
+      - "El assert dice la verdad: 'no hay ningun par en el registro: no se puede probar nada'"
+    por_que_importa: >
+      Deja la suite del panel en rojo por un dato ausente, no por un defecto
+      de codigo. Un rojo perpetuo por infraestructura ensena a su lector a
+      ignorar el rojo, que es exactamente lo que el rojo no debe volverse.
+    fix_propuesto: "Mismo tratamiento que ffbe39f: saltar con motivo si el registro esta vacio; o sintetizar un registro pequeno en tmp_path para que el test siempre corra y deje de depender del arbol."
+    coste: trivial
+    reversibilidad: trivial
+    estado: RESUELTO
+    resuelto_por: >
+      El segundo camino: un fixture construye un registro sintetico con la
+      propia API del modulo (nuevo, registrar_grabacion, declarar_tramo,
+      guardar) en tmp_path y lo inyecta parcheando
+      research.registro.RUTA_REGISTRO -lo que cargar() lee en cada llamada-,
+      asi que el test y las rutas del panel ven lo mismo. Con el par "dentro"
+      sintetico, el caso dentro/fuera del parametrizado recupero su fuerza
+      (habia degradado a dos casos ausentes). Y el test del include apunta
+      ahora a /laboratorio/avanzado, que es donde el include vive: la
+      simplificada /laboratorio ya no pinta ficha, y con la pagina entera el
+      assert solo pasaba por accidente -un banner ajeno del terminal aporto
+      el 'no esta' que lo delato.
+    verificado: "2026-10-11: fichero aislado 4/4; suite del panel completa 411/411, exit 0."
+    siguiente_accion: "ninguna"
+    detectado_en: "2026-10-11, refrescando la evidencia del panel"
+
+  - id: ISS-032
+    titulo: "La configuracion permite combinaciones cuyo perfil miente sobre la capacidad real de envio"
+    severidad: CRITICA
+    confirma: si
+    componente: [SEG-003, RISK-001, CTL-001]
+    tipo: defecto_confirmado
+    resumen: >
+      Hay DOS interruptores de capacidad que el cargador no valida entre si:
+      ``execution.profile`` decide el puerto de ordenes (el camino nuevo), y
+      ``execution.live.enabled`` decide el libro (BrokerBook, que envia ordenes
+      reales via gateway: el camino viejo), la puerta de evidencia, el
+      presupuesto de riesgo y un ``dry_run`` que hoy solo cambia mensajes. El
+      resultado: combinaciones aceptadas cuya capacidad real contradice el
+      perfil declarado. Es exactamente el pendiente 5 de la seccion 12.
+    evidencia:
+      - "F1: live.enabled=true construye BrokerBook, cuyo open_position llama backend.open_market (simulation/broker_book.py:626) y close_position a backend.close (:696). La rama 'local' de ProcessBar (core/usecases/process_bar.py:462) llega ahi via PortfolioBook (adapters/portfolio/simulated_book.py:108) con CUALQUIER perfil, incluidos research/paper/shadow cuyos CAPACITIES dicen 'no puede enviar'. El NoSendBroker protege el puerto; el libro es otra via."
+      - "F2: profile=demo + live.enabled=false (el config distribuido + UNA linea, y tests/test_cableado_demo.py:161 lo FIJA como cargable) cablea el puerto real (app/main.py:646 solo mira el perfil), se salta la puerta de evidencia (:304 mira is_live), usa el presupuesto simulado del 1% en vez del 0.25% live (:554), opera con libro simulado, y TODOS los mensajes dicen 'DRY RUN - simulated book, no orders' (:690) y 'in DRY RUN and sends no orders' (runtime/loop.py:581)"
+      - "F3: --dry-run solo cambia el flag de mensajeria (app/main.py:903-909); ProcessBar decide el envio con puede_enviar y puerto, sin consultar dry_run (process_bar.py:433), y el libro tampoco. El docstring de cmd_run promete 'simulate and send nothing' y test_launch_command.py:403 documenta 'forces the simulated book': hoy es cosmetico en configs live"
+      - "F4: la puerta de evidencia (:304) comprueba is_live pero su mensaje dice 'perfil con permiso de envio' - el predicado y el texto derivaron"
+    por_que_importa: >
+      La especificacion (seccion 6) exige capacidades inequivocas por perfil y
+      barreras que protejan el camino de ejecucion efectivo; la 3.3 prohibe
+      habilitar envios por descuido. Hoy el arbol esta a UNA linea de un bot
+      que enviaria ordenes reales a la cuenta demo con todos los indicadores
+      diciendo 'DRY RUN', y cualquier perfil 'sin envio' combina con un libro
+      que si envia. Lo unico que hoy frena las combinaciones enabled=true es la
+      puerta de evidencia, que es dependiente de datos: se abrira el dia que
+      un experimento aguante.
+    fix_aplicado: >
+      Coherencia obligatoria en el LOADER (app/config.py, un solo sitio): un
+      perfil con capacidad de envio (demo/live) exige live.enabled=true, y
+      live.enabled=true exige un perfil con capacidad (_PERFILES_CON_ENVIO).
+      Con eso una sola prediceta gobierna libro, puerta, presupuesto y
+      puerto, y el mensaje de la puerta (:311) vuelve a ser verdad. --dry-run
+      sobre un config live se niega a arrancar en run Y once con un mensaje
+      que apunta al interruptor real (la linea versionada del fichero), y el
+      arranque registra perfil.describe() completo. La receta de DEMO pasa a
+      ser dos lineas: profile: demo + live.enabled: true.
+    coste: bajo
+    reversibilidad: "trivial: es validacion de entrada, no cableado nuevo"
+    estado: RESUELTO
+    verificado: >
+      2026-10-11: suite completa del bot 1461 coleccionados, 1382 pasan, 0
+      fallan, 79 saltan con motivo, exit 0 (541 s). Tests nuevos del fix: 2
+      de rechazo del loader (demo sin enabled, enabled sin perfil con envio)
+      en test_cableado_demo, 1 del CLI honesto (run y once rehusan --dry-run
+      sobre un config live) en test_no_order_path. El config distribuido
+      (research + enabled: false) sigue cargando igual.
+    siguiente_accion: "ninguna"
+    detectado_en: "2026-10-11, revision del pendiente 5 de la seccion 12 de la especificacion maestra"
+
+  - id: ISS-033
+    titulo: "El panel ofrecia interruptores de riesgo muertos y no mostraba el perfil activo"
+    severidad: media
+    confirma: si
+    componente: [SEG-003, OBS-001, OBS-003]
+    tipo: desactualizacion_del_panel
+    resumen: >
+      Dos desajustes del panel respecto a la etapa, encontrados en la
+      auditoria previa a su reestructuracion. (1) La pagina de ajustes
+      seguia ofreciendo la seccion `risk` - ONCE interruptores que el bot
+      descarta desde el 2026-10-10: controles que aparentan estar operativos
+      y no lo estan, lo que la seccion 10 de la especificacion prohibe. (2)
+      El panel no mostraba en ninguna parte el perfil de ejecucion ni su
+      capacidad (secciones 6 y 10), aunque el perfil es desde ISS-032 la
+      autoridad de capacidades.
+    evidencia:
+      - "El esquema `available` de /api/features y de la pagina de ajustes inclua `risk`; el bot lo descarta (app/config.py, 2026-10-10)"
+      - "El esquema estaba DUPLICADO literal en dos constructores que podian envejecer por separado"
+      - "Grep de plantillas: ningun .html del panel menciona perfil; el heartbeat no lo publicaba"
+    fix_aplicado: >
+      Fase 1: esquema unico _FEATURES_SCHEMA sin `risk`, nota visible que
+      apunta al YAML versionado, y POST que descarta risk/limitas con
+      respuesta explicita (422 si no queda nada). Fase 2: el heartbeat
+      publica profile y puede_enviar como campos extra del contrato, y la
+      pagina del bot los pinta - sin inventarlos cuando un latido viejo no
+      los trae.
+    verificado: "2026-10-11: 4/4 test_features_sin_riesgo, 3/3 test_perfil_en_panel, 1/1 heartbeat-lleva-perfil (bot); suites panel 418/418 y bot en re-verificacion completa."
+    coste: bajo
+    reversibilidad: trivial
+    estado: RESUELTO
+    siguiente_accion: "ninguna"
+    detectado_en: "2026-10-11, auditoria del panel previa a su reestructuracion"
+
+  - id: ISS-034
+    titulo: "La puerta R:R seguia siendo apagable desde el panel: el unico freno fuera del YAML"
+    severidad: media
+    confirma: si
+    componente: [SEG-003, RISK-001]
+    tipo: defecto_confirmado
+    resumen: >
+      El cierre del 2026-10-10 (ISS-003/R-002, opcion B) saco del panel los
+      bloques `risk` y `limites`, pero la puerta R:R - `features.sizing.
+      reward_risk_gate` y su umbral `min_reward_risk` - siguio viajando en el
+      bloque `sizing` del traspaso, que el bot NO descarta. Resultado: era el
+      unico freno del sistema que un clic en el navegador podia apagar o
+      rebajar. Detectado como nota residual en la auditoria del panel;
+      decidido por el dueno el 2026-10-11: se muda al YAML versionado, como
+      los otros once.
+    evidencia:
+      - "app/features.py: sizing_raw.get('reward_risk_gate') - el bloque sizing entero se mezclaba con el traspaso del panel"
+      - "_FEATURES_SCHEMA ofrecia 'Puerta R:R' y 'Minimo R:R' en la pagina de ajustes"
+      - "config/gts.yaml:425-426 ya declaraba la puerta en el YAML: el hogar versionado ya existia"
+    fix_aplicado: >
+      Descarte QUIRURGICO en ambos extremos, como ISS-003: el loader descarta
+      solo reward_risk_gate y min_reward_risk del bloque sizing del traspaso
+      (con aviso al log), y el panel deja de ofrecerlas y las rechaza o
+      descarta con respuesta explicita. El RESTO del bloque sizing
+      (atr_based) sigue siendo del panel: es mecanica del dimensionador, no
+      un freno.
+    verificado: >
+      2026-10-11: test_puente_banderas (la puerta no llega, el umbral no
+      llega, atr_based SI llega); 3 tests nuevos del panel (esquema sin
+      puerta, POST con puerta descarta y lo dice, solo-puerta 422 con el
+      motivo); suites panel 447/447 y bot en re-verificacion completa.
+    coste: trivial
+    reversibilidad: trivial
+    estado: RESUELTO
+    siguiente_accion: "ninguna"
+    detectado_en: "2026-10-11, nota residual de la auditoria del panel; resuelto el mismo dia por decision del dueno"

@@ -1,0 +1,191 @@
+%% GTS — Dependencias, flujo de datos y flujo de decision
+%% Fuente: project-control/SYSTEM_MAP.md · Revision: e801d4e (2026-10-10)
+%% Renderizar con: mmdc -i DEPENDENCIES.mmd -o DEPENDENCIES.svg
+%% El color codifica el ESTADO MEDIDO, no la intencion:
+%%   verde  = validado y con operacion medida
+%%   ambar  = existe pero sin evidencia suficiente
+%%   rojo   = abierto con impacto en la fiabilidad
+%%   gris   = ausente o retirado
+
+flowchart TD
+
+  %% ══════════════ CAPA 0: DATOS ══════════════
+  subgraph L0["0 · DATOS DE MERCADO"]
+    MT5T["mt5/terminal.py<br/>Terminal MT5"]
+    MT5F["mt5/feed.py<br/>Feed de barras<br/><i>descarta la barra en formacion</i>"]
+    RAW["data/raw/*.csv<br/>8 CSVs · AUDUSD/EURUSD/GBPUSD/USDJPY/XAUUSD<br/>+ EURUSD_M15, AUDUSD_H4, AUDUSD_H1"]
+    PROV["data/raw/provenance.yaml<br/><i>origen, rango, barras</i>"]
+    GATE["research/window.py<br/>Puerta de lectura CSV"]
+  end
+
+  %% ══════════════ CAPA 1: FEATURES ══════════════
+  subgraph L1["1 · FEATURES"]
+    EXT["core/features/universal_extractor.py<br/>Extractor universal"]
+    NORM["core/features/normalizers.py<br/>1 scaler por clase de activo<br/><i>se ajusta SOLO con train</i>"]
+    SPEC["core/features/asset_specs.py<br/>Mapa de timeframes<br/><i>max_timeframes=8,error nombrado</i>"]
+  end
+
+  %% ══════════════ CAPA 2: MODELO ══════════════
+  subgraph L2["2 · MODELO"]
+    UM["core/universal/universal_model.py<br/>Transformer 3.9M params<br/>3 cabezas"]
+    MAN["core/model_manifest.py<br/>Manifiesto del checkpoint"]
+    CKPT["checkpoints_training/best_model.pt<br/><i>epoch 0 de un run con early stop</i>"]
+  end
+
+  %% ══════════════ CAPA 3: INVESTIGACION ══════════════
+  subgraph L3["3 · INVESTIGACION"]
+    LBL["research/labeling.py<br/>Triple barrera relativa a volatilidad<br/><i>numba</i>"]
+    BT["research/backtest_v2.py<br/>Motor con purga y embargo"]
+    SW["research/sweep.py<br/>Barrido de la rejilla"]
+    SWP["research/sweep_parallel.py<br/>Reparto entre procesos"]
+    RC["research/reality_check.py<br/>White + Newey-West<br/><i>10 000 boots</i>"]
+    CONF["research/confirmacion.py<br/>Confirmacion sobre tramo limpio"]
+    WF["research/walkforward.py<br/>148 folds<br/><i>NO reentrena por fold</i>"]
+    CRIT["research/criterio.py<br/><i>Criterio preinscrito</i>"]
+  end
+
+  %% ══════════════ CAPA 4: REGISTRO (LA PUERTA) ══════════════
+  subgraph L4["4 · REGISTRO"]
+    REG["research/registro.py<br/>Regla 8: ventanas gastadas"]
+    REGF["data/research/registro-experimentos.json<br/><i>CERO pares confirmados</i>"]
+    EVID["evidencia_confirmada()<br/><i>el puente</i>"]
+  end
+
+  %% ══════════════ CAPA 5: DECISION ══════════════
+  subgraph L5["5 · DECISION EN OPERACION"]
+    LOOP["runtime/loop.py<br/>1305 LOC · journaliza CADA barra"]
+    STRAT["strategies/registry.py<br/>11 reglas · una por pregunta"]
+    DEC["decisions/decide.py<br/><i>senal → accion, funcion pura</i>"]
+    DC["app/decision_core.py<br/>senal → riesgo → sizing → libro"]
+  end
+
+  %% ══════════════ CAPA 6: RIESGO ══════════════
+  subgraph L6["6 · RIESGO"]
+    ENG["risk/engine.py<br/>11 validadores"]
+    VAL["risk/validators.py"]
+    SIZER["risk/sizer.py"]
+    PO["risk/portfolio_optimizer.py<br/><i>SIN TESTS · enabled:true</i>"]
+    COST["core/costs.py<br/><i>2 modos: medido/conservador</i>"]
+    BROKER["core/broker_profile.py<br/>+ brokers/*.yaml"]
+  end
+
+  %% ══════════════ CAPA 7: EJECUCION ══════════════
+  subgraph L7["7 · EJECUCION"]
+    BOOK["simulation/portfolio.py<br/>Libro en memoria<br/><i>abre al ask, cierra al bid</i>"]
+    LIVE["live/execution.py + live/terminal.py<br/><i>UNICO camino a order_send</i><br/><i>APAGADO</i>"]
+  end
+
+  %% ══════════════ CAPA 8: EVIDENCIA OPERATIVA ══════════════
+  subgraph L8["8 · EVIDENCIA"]
+    JRN["storage/journal.py<br/>Cadena de hash"]
+    JFILE["data/journal/decisions.jsonl<br/><i>0 BYTES · sin sesion real</i>"]
+    CTRL["runtime/control.py<br/>pause / resume / flatten"]
+    STATE["data/control/state.json<br/><i>heartbeat 2026-10-02</i>"]
+  end
+
+  %% ══════════════ CAPA 9: PANEL ══════════════
+  subgraph L9["9 · PANEL (SOLO LECTURA)"]
+    PANEL["dashboard/app/main.py<br/>84 rutas · 0 de orden"]
+    MT5E["dashboard/app/mt5_engine.py"]
+    FEATSPOST["POST /api/features<br/><i>SIN AUTENTICACION</i>"]
+  end
+
+  %% ══════════════ ARISTAS: DATOS ══════════════
+  MT5T --> MT5F --> LOOP
+  MT5T --> RAW
+  RAW --> GATE
+  PROV -.declara.-> RAW
+
+  %% ══════════════ ARISTAS: FEATURES → MODELO ══════════════
+  GATE --> EXT
+  EXT --> NORM
+  SPEC --> UM
+  NORM --> UM
+  CKPT --> UM
+  MAN -.declara.-> CKPT
+  EXT --> LBL
+
+  %% ══════════════ ARISTAS: INVESTIGACION ══════════════
+  LBL --> BT
+  GATE --> BT
+  BT --> SW
+  STRAT --> SW
+  SW --> RC
+  SWP -.reparte.-> SW
+  SW --> CONF
+  BT --> WF
+  CRIT --> SW
+  CRIT --> CONF
+
+  %% ══════════════ ARISTAS: REGISTRO — LA CADENA DE EVIDENCIA ══════════════
+  RC --> CONF
+  CONF --> REG --> REGF
+  REGF --> EVID
+  EVID -->|"build_bot: sin evidencia, RuntimeError"| DC
+
+  %% ══════════════ ARISTAS: DECISION ══════════════
+  STRAT --> LOOP
+  DC --> LOOP
+  DEC -.-> DC
+  LOOP --> DC
+  DC --> ENG
+  ENG --> VAL
+  ENG --> SIZER
+  PO -.-> DC
+  DC --> BOOK
+  SIZER --> BOOK
+  COST --> BOOK
+  COST --> BT
+  BROKER --> COST
+
+  %% ══════════════ ARISTAS: EJECUCION ══════════════
+  ENG -->|"live.enabled=true"| LIVE
+  BOOK -.importa a nivel de modulo.-> LIVE
+
+  %% ══════════════ ARISTAS: EVIDENCIA OPERATIVA ══════════════
+  LOOP --> JRN --> JFILE
+  LOOP --> CTRL --> STATE
+  LOOP -.reconcilia.-> LOOP
+
+  %% ══════════════ ARISTAS: PANEL ══════════════
+  STATE -->|"lectura"| PANEL
+  JFILE -->|"lectura + verifica hash"| PANEL
+  MT5T --> MT5E --> PANEL
+  PANEL -->|"pause/resume/flatten"| CTRL
+  PANEL -->|"ESCRIBE"| FEATSPOST
+  FEATSPOST -->|"features.json"| ENG
+
+  %% ══════════════ ESTILOS ══════════════
+  classDef verde fill:#d4edda,stroke:#28a745,color:#155724
+  classDef ambar fill:#fff3cd,stroke:#ffc107,color:#856404
+  classDef rojo fill:#f8d7da,stroke:#dc3545,color:#721c24
+  classDef gris fill:#e2e3e5,stroke:#6c757d,color:#383d41
+
+  class MT5T,MT5F,RAW,GATE,EXT,NORM,SPEC verde
+  class UM,CKPT,MAN,LBL,BT,SW,SWP,RC,CONF,WF,CRIT verde
+  class REG,REGF,EVID verde
+  class LOOP,STRAT,DEC,DC,ENG,VAL,SIZER,COST,BROKER verde
+  class BOOK,JRN,CTRL,STATE,PANEL,MT5E verde
+
+  class PO,WF ambar
+  class JFILE,FEATSPOST,REGF rojo
+  class LIVE gris
+
+  %% ══════════════ NOTAS ══════════════
+  %% D1: app/main.py declara "the dependency graph is a tree"; hay 8 aristas
+  %%     del bot hacia research/ (el instrumento). Documentado como divergencia.
+  %% D2: runtime/loop.py:49 importa app.decision_core -> ciclo duro app<->runtime.
+  %% D3: D-017 se cumple: 0 aristas de dashboard/app/* hacia app/*.
+  %% D5: simulation/broker_book.py:66 importa live.execution a nivel de modulo.
+  %%
+  %% LO QUE ROMPE ESTE GRAFO HOY:
+  %%   1. REGF esta VACIO de confirmados -> EVID devuelve [] -> el bot se niega
+  %%      a arrancar. Es el comportamiento correcto y el sistema esta parado por
+  %%      su propia regla, no por un fallo.
+  %%   2. JFILE esta vacio: la cadena de hash nunca se ha comprobado contra una
+  %%      sesion real.
+  %%   3. LIVE es alcanzable desde BOOK por import (no por logica), asi que el
+  %%      unico test de "solo un modulo puede escribir" depende de una lista de
+  %%      prohibidos, no de la estructura.
+  %%   4. FEATSPOST es el unico camino que puede DESACTIVAR los 11 validadores,
+  %%      sin autenticacion.

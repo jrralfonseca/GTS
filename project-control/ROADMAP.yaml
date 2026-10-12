@@ -1,0 +1,484 @@
+# GTS — Roadmap por dependencias
+# Revision: ffbe39f · Fecha: 2026-10-11
+#
+# CRITERIO DE ORDEN (del encargo, y el que manda):
+#   No se prioriza velocidad ni funcionalidad nueva por encima de correccion,
+#   control de riesgo o validez de las pruebas.
+#
+# POR QUE ESTE ORDEN Y NO OTRO:
+#   El sistema esta parado por su propia regla — cero evidencia confirmada, el bot
+#   se niega a arrancar. No es un fallo: es la puerta funcionando. Lo que falta no
+#   es velocidad, es que la evidencia que YA HAY en disco llegue a las vallas, y que
+#   las tres afirmaciones del sistema que no se sostienen se corrijan.
+#
+#   Las tareas baratas van primero porque/desbloquean la MEDICION de las caras. Un
+#   test rojo que se corrige con una linea (R-001) es lo que hace R-002 medible.
+
+meta:
+  fecha: "2026-10-11"
+  commit: "ffbe39f"
+  regla_de_orden: "correccion > control de riesgo > validez de pruebas > trazabilidad > velocidad > funcionalidad"
+  ninguna_tarea_arranca_sin_aprobacion: true
+  estado_del_sistema: >
+    PARADO POR DISENO: sin evidencia confirmada el bot sigue negandose a
+    arrancar. La suite del bot esta VERDE y confirmada con corrida propia
+    (2026-10-11); la del panel tiene un rojo de infraestructura (ISS-031),
+    no de codigo.
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BLOQUE A — La verdad antes que nada (barato, desbloquea la medicion)
+# ═══════════════════════════════════════════════════════════════════════════
+tareas:
+
+  - id: R-001
+    prioridad: 1
+    titulo: "Que la suite del bot vuelva a estar en verde"
+    justificacion: >
+      1381/1384 pasan. Los 3 fallos tienen una sola causa: un bundle de
+      entrenamiento obsoleto que se inyecta en sys.path. No es un defecto del
+      barrido, es del arnes — pero un arnes que importa el codigo equivocado puede
+      hacer que un resultado sea irreproducible, y un numero irreproducible no es
+      evidencia. Ademas deja la unica senal automatica del sistema en rojo.
+    resuelve: [ISS-001, ISS-026, ISS-027]
+    componentes: [ML-003, QA-001, RES-002]
+    depende_de: []
+    bloquea_a: [R-002, R-006, R-008]
+    tareas:
+      - "Decidir si se regenera el bundle antes de la suite, o se aísla el sys.path del test de Kaggle con restauracion"
+      - "Verificar que gts/ se reconstruye o se ignora de forma explicita en el orden de tests"
+    criterios_aceptacion:
+      - "pytest tests -> exit 0"
+      - "pytest tests\\test_kaggle_layout.py tests\\test_sweep_parallel.py -> exit 0 (orden adverso)"
+      - "La paridad paralelo/serie queda verificada en la suite completa, no solo aislada"
+    pruebas: ["tests/test_sweep_parallel.py (los 3 que fallan)"]
+    evidencia_esperada: "EVIDENCE.yaml -> suites[bot] con passed=1384, failed=0, exit_code=0"
+    coste: "bajo"
+    riesgo: "nulo: no toca logica de trading"
+    tiempo_para_desbloquear_la_siguiente: "inmediato"
+    estado: COMPLETADO
+    completado: "2026-10-11"
+    evidencia: >
+      Suite completa: 1458 coleccionados, 1379 pasan, 0 fallan, 79 saltan con
+      motivo, exit 0, 640 s. Orden adverso (kaggle_layout antes de
+      sweep_parallel): exit 0. La causa de los 3 fallos murio con el bundle
+      eliminado (gts/ ya no existe; sus tests saltan con motivo). Detalle y
+      leccion del incidente de la cache de numba en EVIDENCE.yaml suites[bot].
+
+  - id: R-002
+    prioridad: 2
+    titulo: "Decidir si el panel puede desarmar los validadores de riesgo"
+    justificacion: >
+      POST /api/features escribe el fichero que traduce a los limites que lee el
+      motor de riesgo, sin autenticacion ni CSRF. El panel no coloca ordenes —que es
+      lo que el encargo protege y el sistema respeta con valla— pero puede apagar
+      los once frenos que las autorizan. Es el unico hallazgo de seguridad abierto.
+    resuelve: [ISS-003]
+    componentes: [SEG-003, RISK-001]
+    depende_de: []
+    bloquea_a: []
+    requiere_decision_del_propietario: true
+    opciones:
+      - "A: Exigir motivo obligatorio + confirmacion explicita para cualquier interruptor de riesgo, y journalizarlo"
+      - "B: Sacar los interruptores de riesgo del panel; solo en el YAML versionado"
+    criterio_de_esquema: >
+      El encargo dice que la interfaz no debe adquirir permisos de trading. B es la
+      lectura literal; A es la pragmatica. Es una decision del propietario.
+    criterios_aceptacion:
+      - "Existe un test que exige autorizacion en POST /api/features"
+      - "Ningun cliente HTTP local puede desactivar un validador sin una accion deliberada y trazable"
+    pruebas: ["dashboard/tests/test_features_sin_riesgo.py (nuevos, 4/4)"]
+    evidencia_esperada: "EVIDENCE.yaml -> seguridad: la comprobacion pasa de NO_CUMPLE a CUMPLE con su metodo"
+    coste: "bajo"
+    riesgo: "bajo, reversible"
+    estado: RESUELTO
+    resuelto: >
+      2026-10-11, por la via B (la mas estricta): el bot descarta risk/limites
+      del traspaso desde el 2026-10-10, y la reestructuracion del panel dejo
+      de ofrecer la seccion, dice donde vive el riesgo (el YAML versionado) y
+      rechaza o descarta los POST que intenten colarlo, con respuesta
+      explicita. Ver ISS-003 para el detalle y la verificacion.
+
+  - id: R-003
+    prioridad: 3
+    titulo: "Reservar un tramo que no entre ni en entrenamiento ni en elegir epoch"
+    justificacion: >
+      Es EL bloqueo del sistema. De 148 folds, 28 se tachan fuera de muestra y 8 de
+      esos son la validacion que eligio el checkpoint. Solo 12 de 148 (8.1%) caen
+      en barras que el modelo no vio en ninguna capacidad. Mientras no exista ese
+      tramo, ninguna afirmacion sobre si el modelo tiene habilidad es respondible:
+      el Sharpe OOS de -0,064 +- 1,363 tiene 21 veces mas dispersion que valor.
+    resuelve: [ISS-002, ISS-010]
+    componentes: [VAL-002, ML-002, ECO-001, BT-001]
+    depende_de: [R-001]
+    bloquea_a: [R-010, R-011, R-012]
+    requiere_aprobacion_explicita: "Es un cambio de la particion de datos: cambia que cifras existen."
+    alcance_minimo:
+      - "Partir la serie en tres: train / validacion-de-epoch / HELD-OUT-FINAL"
+      - "El HELD-OUT no entra en ninguna funcion que ajuste nada"
+      - "Cada fold declara su posicion respecto a los tres cortes, no a uno"
+    fuera_de_alcance:
+      - "Reentrenar por fold (caro; es R-013, no esto)"
+    criterios_aceptacion:
+      - "Existe al menos un fold cuyo test empieza despues del FIN de la validacion"
+      - "El agregado declara cuantos hay de cada tipo, con su N"
+      - "Un test que falle si el held-out aparece en alguna funcion de ajuste"
+    pruebas:
+      - "test que verifique que el held-out no se usa en train_pos, val_pos ni en la seleccion de epoch"
+      - "test que cuente los folds por categoria y exija >= 1 fuera de muestra estricto"
+    evidencia_esperada: >
+      Un walk-forward nuevo con: n_folds, n_in_sample, n_out_of_sample ESTRICTO, su
+      Sharpe con su desviacion, y su procedencia completa. Un Sharpe de -0,064 +- 1,363
+      no es un hallazgo; un Sharpe con N sufficient y su dispersion, si.
+    coste: "medio (la particion; sin reentrenar)"
+    riesgo: "bajo, reversible revirtiendo la particion"
+
+  - id: R-004
+    prioridad: 4
+    titulo: "Que el perfil de broker que produjo la evidencia exista en el arbol"
+    justificacion: >
+      Los resultados del 2026-10-10 declaran broker: exness en su procedencia. Ese
+      YAML esta borrado del arbol de trabajo. El sistema gasto dos commits
+      persiguiendo la trazabilidad completa, y esa garantia queda anulada si el
+      fichero que el resultado declara no esta.
+    resuelve: [ISS-004]
+    componentes: [OPS-003, RES-002, VAL-002]
+    depende_de: []
+    bloquea_a: []
+    requiere_decision_del_propietario: true
+    opciones:
+      - "A: Restaurar brokers/exness.yaml desde HEAD y decidir cual es el perfil canonico"
+      - "B: Re-emitir los resultados con brokers/metaquotes-demo.yaml, que si esta"
+    criterios_aceptacion:
+      - "El broker declarado en cada resultado de data/research/ existe en brokers/"
+      - "Un test que verifique esa correspondencia"
+    pruebas: ["nuevo test: el broker de cada procedencia apunta a un fichero existente"]
+    evidencia_esperada: "Los mismos resultados, con un broker que se puede abrir."
+    coste: "trivial"
+    riesgo: "nulo"
+    aviso: "OBSOLETO: las 220 eliminaciones preparadas ya no existen (resueltas en commits) y brokers/exness.yaml esta restaurado y versionado."
+    estado: RESUELTO
+    resuelto: "2026-10-11: brokers/exness.yaml verificado en git ls-files y en disco; los walkforwards que lo citaban fueron retirados por la limpieza de la nueva etapa."
+
+  - id: R-005
+    prioridad: 5
+    titulo: "Decidir donde vive la evidencia"
+    justificacion: >
+      data/ esta en .gitignore. Ni data/raw/ ni data/research/ tienen backup
+      declarado. El sistema sabe declarar la procedencia de un resultado, pero el
+      soporte fisico de esa evidencia no esta en ningun sitio versionado.
+    resuelve: [ISS-016]
+    componentes: [OPS-003]
+    depende_de: []
+    bloquea_a: []
+    requiere_decision_del_propietario: true
+    es_una_decision: "de coste y de riesgo, no tecnica"
+    criterios_aceptacion:
+      - "Existe una politica escrita de que se guarda y donde"
+      - "El dueno sabe que se pierde si se borra el arbol"
+    evidencia_esperada: "La decision, escrita, en DECISIONS.md"
+    coste: "por decidir"
+    riesgo: "nulo para el codigo"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BLOQUE B — Las afirmaciones que el sistema no sostiene
+# ═══════════════════════════════════════════════════════════════════════════
+
+  - id: R-006
+    prioridad: 6
+    titulo: "Convertir la evidencia en disco en evidencia vigilada"
+    justificacion: >
+      Cinco guardianes se saltan con 'no sweep result on disk', pero los barridos
+      YA ESTAN en disco con n_trials=25 y el bloque reality_check completo. El unico
+      test que ejecuta el Reality Check de punta a punta no corre nunca. Un skip que
+      nadie mira es peor que un fallo: el unico sintoma es que el guardiano no esta.
+    resuelve: [ISS-006, ISS-009]
+    componentes: [QA-001, RES-003, RES-002, ECO-001]
+    depende_de: [R-001]
+    bloquea_a: []
+    criterios_aceptacion:
+      - "Ningun test se salta por falta de un fichero que existe"
+      - "Si el fichero no existe, el test FALLA con un mensaje que dice que falta"
+      - "El numero de skips baja de 10 a los que sean justificables"
+    pruebas:
+      - "Los 5 skips convertidos en fallos anunciados"
+      - "test_shipped_signal_source.py deja de depender de sweep-H4.json, que no existe"
+    evidencia_esperada: "EVIDENCE.yaml -> suites[bot].skipped con el recuento nuevo y el motivo de cada uno"
+    coste: "bajo"
+    riesgo: "nulo"
+
+  - id: R-007
+    prioridad: 7
+    titulo: "Que el test de conformidad de costes ejerza los dos motores"
+    justificacion: >
+      El costeo unificado es el cambio mas grande de las ultimas dos semanas. La
+      valla que lo sostiene calcula el bruto A MANO y llama a trade_costs; nunca
+      construye el motor del backtest. La garantia de que backtest y simulacion
+      cobran lo mismo no esta probada por ninguna parte.
+    resuelve: [ISS-005]
+    componentes: [BT-002, ACC-001, COST-001]
+    depende_de: []
+    bloquea_a: []
+    criterios_aceptacion:
+      - "_neto_backtest_usd() obtiene su bruto de PurgedWalkForwardBacktest, no de una cuenta manual"
+      - "El test falla si alguien cambia el spread del modulo y no actualiza el test"
+    pruebas: ["tests/test_cost_conformity.py reescrito"]
+    evidencia_esperada: "El mismo test, con dos motores ejercidos de verdad"
+    coste: "bajo"
+    riesgo: "nulo"
+
+  - id: R-008
+    prioridad: 8
+    titulo: "Decidir si el optimizador de cartera funciona, y v-allarlo"
+    justificacion: >
+      portfolio_optimizer.enabled: true es el unico componente de riesgo sin un solo
+      test. La auditoria anterior lo dio por roto; hoy se verifico que el campo que
+      le faltaba YA EXISTE, asi que la premisa era obsoleta. No se sabe si funciona,
+      si esta roto, o si traga la excepcion. Un componente declarado activo sin test
+      y con except es indistinguible de uno roto.
+    resuelve: [ISS-007, ISS-008]
+    componentes: [PORT-001]
+    depende_de: [R-001]
+    bloquea_a: []
+    criterios_aceptacion:
+      - "Un test demuestra que cambiar max_symbol_weight cambia el resultado"
+      - "Un test falla si la rama captura una excepcion y sigue"
+      - "La clave codependence del YAML significa algo o no esta"
+    pruebas: ["tests/test_portfolio_optimizer.py nuevo"]
+    evidencia_esperada: "COMPONENTS.yaml -> PORT-001 con validacion: probada y un resultado"
+    coste: "bajo"
+    riesgo: "nulo"
+    nota: "VERIFICAR ANTES DE ARREGLAR. Puede que ya funcione y solo le falte el test."
+
+  - id: R-009
+    prioridad: 9
+    titulo: "Corregir las afirmaciones del sistema que no se sostienen"
+    justificacion: >
+      config/gts.yaml justifica la regla por defecto con un fichero que no existe
+      (citado en 5 sitios). El README declara abiertos dos huecos que el codigo ya
+      cerro (coste de transaccion y correccion multiple), y lo dice en dos secciones
+      distintas que se contradicen. Un documento que cita evidencia inexistente hace
+      que quien llegue tarde tome la decision equivocada.
+    resuelve: [ISS-009, ISS-018, ISS-019, ISS-021]
+    componentes: [ECO-001, REQ-001, QA-004]
+    depende_de: []
+    bloquea_a: []
+    criterios_aceptacion:
+      - "Cero citas a ficheros que no existen (config + README)"
+      - "La justificacion de la regla por defecto dice lo que esta MEDIDO: tres p-valores, todos > 0.05"
+      - "Los huecos de validez del README reflejan el estado del codigo"
+      - "El docstring del grafo de dependencias dice lo que el grafo es"
+    pruebas: ["test que falle si alguien cita un fichero inexistente en config/"]
+    evidencia_esperada: "SYSTEM_MAP.md y README sincronizados; COMPONENTS.yaml sin discrepancias"
+    coste: "bajo"
+    riesgo: "nulo: es documentacion, no logica"
+    decision_relacionada: >
+      La regla por defecto es EMA_Trend_Pullback y su unico barrido da p = 0.998.
+      Corregir la cita NO cambia el resultado. Puede que la decision de seguir
+      operandola como default sea del dueno y deba quedar escrita como tal, con su
+      razon. Eso es R-010.
+
+  - id: R-010
+    prioridad: 10
+    titulo: "Decidir que hace el sistema con una regla sin evidencia"
+    justificacion: >
+      El sistema tiene un mecanismo de seguridad que funciona: el bot se niega a
+      arrancar sin evidencia confirmada. Pero config/gts.yaml declara igualmente
+      una regla por defecto, y con --selection por CLI el bot opera sin comprobar
+      evidencia (el propio codigo lo avisa por log). La pregunta es si esa puerta
+      debe tener una segunda cerradura.
+    resuelve: [ISS-009]
+    componentes: [REQ-002, ECO-001]
+    depende_de: [R-009]
+    bloquea_a: []
+    requiere_decision_del_propietario: true
+    opciones:
+      - "A: --selection exige un motivo y se journaliza (hoy avisa por log y sigue)"
+      - "B: --selection queda solo para dry-run y la puerta es absoluta"
+    criterios_aceptacion:
+      - "La politica esta escrita en DECISIONS.md"
+      - "Un test que verifique que la politica se cumple"
+    evidencia_esperada: "Un journal de una sesion real que muestre por que se permitio operar"
+    coste: "bajo"
+    riesgo: "bajo"
+    nota: >
+      No se recomienda cambiar el comportamiento sin que el dueno lo pida: el
+      mecanismo actual (aviso explicito) es una decision consciente, no un descuido.
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BLOQUE C — Lo que hace falta para que el sistema sea observable y operable
+# ═══════════════════════════════════════════════════════════════════════════
+
+  - id: R-011
+    prioridad: 11
+    titulo: "Una sesion real del bot, con el journal encendido"
+    justificacion: >
+      data/journal/decisions.jsonl tiene 0 bytes. El bot se niega a arrancar sin
+      evidencia, y con --selection solo se registrarian 3 decisiones. El journal es
+      el unico registro de por que el bot decidio lo que decidio; su cadena de hash
+      es hoy una propiedad del codigo, no del sistema.
+    resuelve: [ISS-011]
+    componentes: [ACC-002, CTL-001, CTL-002, OPS-002]
+    depende_de: [R-004]
+    bloquea_a: [R-012]
+    alcance:
+      - "Arrancar el bot en simulacion (live.enabled sigue en false) con --selection"
+      - "Dejarlo correr un rato y verificar la cadena de hash sobre el fichero resultante"
+      - "Comprobar que el panel lee ese journal y lo verifica"
+    criterios_aceptacion:
+      - "decisions.jsonl tiene entradas reales y la cadena verifica de punta a punta"
+      - "Una entrada alterada rompe la verificacion, sobre el fichero real"
+      - "Cada entrada lleva signal_source y la razon"
+    pruebas: ["tests/test_journal_contract.py ejecutado sobre el fichero real"]
+    evidencia_esperada: "Un journal con N entradas, su cadena verificada, y su lectura desde el panel"
+    coste: "bajo"
+    riesgo: "nulo: live.enabled permanece en false"
+
+  - id: R-012
+    prioridad: 12
+    titulo: "Pintar en el panel lo que el panel ya calcula"
+    justificacion: >
+      drawdown, sharpe, winrate, expectancy se calculan y ninguna plantilla los
+      muestra. La procedencia del checkpoint se calcula y custom.css define el estilo
+      sin markup que lo use. El operador mira un panel que no le dice como va el
+      riesgo. Es trabajo de plantilla, no de logica de trading.
+    resuelve: [ISS-022, ISS-025]
+    componentes: [OBS-003, OBS-002]
+    depende_de: []
+    bloquea_a: []
+    criterios_aceptacion:
+      - "Cada metrica pintada muestra su fuente y su N"
+      - "La procedencia del checkpoint aparece antes de fiarse de una senal"
+      - "El boton que apunta al log equivocado apunta al correcto"
+    pruebas: ["dashboard/tests/test_metricas_journal.py (7) + test_como_va_metricas.py (3)"]
+    evidencia_esperada: "Captura o test del panel con las metricas visibles"
+    coste: "bajo"
+    riesgo: "nulo"
+    estado: RESUELTO
+    resuelto: >
+      2026-10-11: metricas del journal operativo (win rate, expectancy, neto,
+      drawdown, Sharpe por operacion) pintadas en la pagina del bot con su
+      fuente, su N y la insignia de muestra insuficiente (N<10); procedencia
+      del checkpoint en la tarjeta de entrenamiento y en la fila de la fuente
+      de senal, cacheada por (ruta, mtime). ISS-025 resulto obsoleto: el
+      lanzador del panel ya escribe donde el visor lee. Ver ISS-022.
+
+  - id: R-013
+    prioridad: 13
+    titulo: "Decidir como se avisa cuando algo va mal"
+    justificacion: >
+      No hay ninguna alerta. El panel degrada visiblemente si el disco esta critico o
+      el journal no escribe, pero eso exige que alguien mire el panel. Si el bot esta
+      parado a las tres de la mañana, nadie se entera. Es el hueco de
+      observabilidad mas grande y el mas barato de cerrar.
+    resuelve: [ISS-023]
+    componentes: [OBS-004, OBS-001]
+    depende_de: []
+    requiere_decision_del_propietario: true
+    es_una_decision: "del canal, no del mecanismo"
+    avisos_minimos:
+      - "bot parado"
+      - "heartbeat rancio"
+      - "disco critico"
+      - "journal sin escribir"
+      - "divergencia entre las banderas pendientes y las que el bot dice estar usando"
+    criterios_aceptacion:
+      - "Existe un camino que avisa, con destinatario declarado"
+      - "Un test demuestra que se dispara, con el canal simulado"
+    evidencia_esperada: "Un aviso realCapturado de un fallo real"
+    coste: "bajo"
+    riesgo: "nulo"
+    estado: RESUELTO
+    resuelto: >
+      2026-10-11, canal Telegram (decision del dueno). Los cinco avisos en
+      dashboard/alertas.py con deduplicacion por transicion, reaviso tras
+      ventana, reintentos con espera creciente y supervisor INDEPENDIENTE
+      del bot (hilo del panel, lee el heartbeat como testigo externo).
+      Credenciales solo en .env. 17/17 tests con el canal simulado Y el
+      aviso real entregado y confirmado por el dueno en su movil el mismo
+      dia (prueba_de_alerta, sendMessage HTTP 200).
+
+  - id: R-014
+    prioridad: 14
+    titulo: "Prueba de supervivencia: matar el bot y relanzarlo"
+    justificacion: >
+      Hay reconciliacion, lock de instancia y manejo de excepciones, y todo tiene
+      test con posiciones sinteticas. Nadie ha matado el bot a mitad de una operacion
+      y ha comprobado que el relanzamiento reconcilia.
+    resuelve: [ISS-017]
+    componentes: [OPS-002, CTL-001]
+    depende_de: [R-011]
+    bloquea_a: []
+    criterios_aceptacion:
+      - "Con una posicion abierta, el bot se relanza y reconcilia sin duplicar"
+      - "El lock no bloquea el reinicio"
+      - "El journal registra la reconciliacion"
+    pruebas: ["guion de supervivencia con el bot en simulacion"]
+    evidencia_esperada: "Un journal que muestre la reconciliacion tras el reinicio"
+    coste: "bajo"
+    riesgo: "nulo: live.enabled permanece en false"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BLOQUE D — Lo que convierte esto en sostenido
+# ═══════════════════════════════════════════════════════════════════════════
+
+  - id: R-015
+    prioridad: 15
+    titulo: "Integracion continua minima"
+    justificacion: >
+      No hay .github ni ningun pipeline. pyproject define pytest, mypy y ruff, pero
+      nada los corre. Los 3 fallos de R-001 llegaron a HEAD porque no habia una
+      puerta. Todo lo demas de este roadmap (las vallas, los invariantes, las puertas)
+      depende de que alguien las ejecute.
+    resuelve: [ISS-012]
+    componentes: [INF-002, QA-003, QA-001, QA-002]
+    depende_de: [R-001]
+    bloquea_a: []
+    criterios_aceptacion:
+      - "Cada push corre las dos suites con el basetemp FUERA del arbol"
+      - "ruff y mypy estan en el pipeline, no solo definidos"
+      - "Un fallo rojo bloquea el merge"
+    pruebas: ["el propio pipeline, en rojo y en verde"]
+    evidencia_esperada: "Un pipeline que ya ha rechazado un commit"
+    coste: "bajo"
+    riesgo: "nulo"
+
+  - id: R-016
+    prioridad: 16
+    titulo: "Decidir que hacer con la carpeta audit/ borrada"
+    justificacion: >
+      220 ficheros de la auditoria del 2026-10-09 estan borrados y preparados para
+      desaparecer del arbol. Son recuperables con git. Sus hallazgos H1 y H6 los he
+      re-verificado hoy y estan parcialmente obsoletos: H1 cerrado, H6 ya no aplica
+      tal como estaba escrito.
+    resuelve: [ISS-020]
+    componentes: [QA-004]
+    depende_de: []
+    bloquea_a: []
+    requiere_decision_del_propietario: true
+    opciones:
+      - "A: Restaurar por tag, marcando los hallazgos re-verificados hoy"
+      - "B: Dejar en el historial. Este mapa (project-control/) ya cubre su funcion"
+      - "C: Borrar del todo, con la decision escrita en DECISIONS.md"
+    criterios_aceptacion: ["Queda escrito por que, en DECISIONS.md"]
+    coste: "trivial"
+    riesgo: "nulo"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Lo que NO esta en el roadmap, y por que
+# ═══════════════════════════════════════════════════════════════════════════
+fuera_de_alcance:
+  - que: "Reentrenar el modelo por fold (walk-forward de verdad)"
+    por_que: "Es la forma CARA de R-003. El cambio barato (la particion) esta primero. Reentrenar sin un tramo reservado seria medir sobre una muestra que ya se uso para elegir."
+    cuando: "despues de R-003, si el tramo reservado da una respuesta"
+  - que: "Anadir mas estrategias al catalogo"
+    por_que: "El catalogo se podo de 18 a 11 el 2026-10-08 con una valla de una voz por pregunta. Anadir seria ir en contra de la decision mas reciente y deliberada."
+  - que: "Conectar la ejecucion real"
+    por_que: "Requiere resolver R-002, tener evidencia confirmada, y una decision explicita del dueno. Ninguna de las tres existe hoy."
+  - que: "Optimizar el ATR que se recalcula en cada barra"
+    por_que: "Medido: 1,171 ms por barra frente a 9,1 ms una vez para 50 000 barras. En operacion es 1,2 ms por H1. Es el 28 % del tiempo de un replay, no un orden de magnitud. Arreglarlo toca el bucle de verdad."
+  - que: "Arreglar el filtro de niveles de los logs del bot"
+    por_que: "Ya resuelto con honestidad: los logs del bot traen un aviso que explica por que no tienen filtro. Un filtro que parece funcionar y no filtra seria PEOR. Documentado en ISS-024 para que nadie lo 'arregle'."
+  - que: "Deflated Sharpe Ratio"
+    por_que: "Decision ya tomada y documentada: daria un segundo numero, mas favorable, al lado del conservador de White. El riesgo es que se cite el favorable."
+  - que: "Mas Parallelizacion del barrido"
+    por_que: "El reparto ya existe y su paridad se exige bit a bit. La limitacion actual es el bundle, no la velocidad (R-001)."

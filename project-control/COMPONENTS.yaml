@@ -1,0 +1,1235 @@
+# GTS — Inventario de componentes y requisitos
+# Fuente: project-control/SYSTEM_MAP.md · Revisión: e801d4e + trabajo sin commitear
+# Fecha: 2026-10-10 · Tipo: auditoría de solo lectura
+#
+# ESTADOS (se mantienen separados a propósito; confundirlos es el defecto que
+# este mapa existe para evitar):
+#   implementacion: existe | parcial | ausente | No evaluado
+#   validacion:     probada | no_probada | No evaluado
+#   operacion:      medida | no_operativa | No evaluado
+#
+# "validada" significa que un test la ejerce. "medida" significa que hay un
+# número de una ejecución real. Ninguna de las dos implica que sea rentable.
+
+meta:
+  version: 1
+  fecha_revision: "2026-10-10"
+  commit_revisado: "e801d4e91af713d31cd267f6898d301fdbd12c1c"
+  trabajo_sin_commitear: 36 ficheros modificados, 220 eliminados (audit/)
+  denominador_tests_bot: 1384
+  denominador_tests_panel: 411
+  metodo: "inspección de árbol + lectura de código + suite de tests; sin MT5, sin órdenes, sin entrenamiento"
+
+componentes:
+
+  # ─────────────────────────── DOMINIO 1: Requisitos ───────────────────────────
+  - id: REQ-001
+    nombre: "Criterios preinscritos por experimento"
+    dominio: 1
+    descripcion: "Cada experimento declara su hipótesis y su criterio de éxito ANTES de correrlo."
+    implementacion: existe
+    validacion: probada
+    operacion: medida
+    criticidad: alta
+    rutas: ["research/criterio.py", "docs/experimentos/", "data/research/registro-experimentos.json"]
+    depende_de: []
+    consumido_por: ["research/sweep_verdict.py", "research/confirmacion.py"]
+    requisitos:
+      - "El criterio se escribe antes del barrido y no se reescribe después"
+      - "Cada par tiene un fichero de criterio en docs/experimentos/"
+    criterios_aceptacion:
+      - "docs/experimentos/ tiene un .md por par examinado"
+      - "El veredicto del barrido lo produce el criterio, no el operador"
+    tests: ["tests/test_confirmacion.py"]
+    resultados_tests: "verde (integrado en 1381/1384)"
+    evidencias: ["data/research/registro-experimentos.json -> pares[*].criterio.ruta", "README.md seccion 'Experimentos'"]
+    deficiencias: ["El criterio de sweep-across-symbols se reescribio 3 veces segun lo descubierto en cada ronda (declarado en el propio README)"]
+    bloqueos: []
+    siguiente_accion: "Ninguna. Es la pieza mejor construida del sistema."
+    ultima_revision: "2026-10-10"
+
+  - id: REQ-002
+    nombre: "Puente evidencia->bot (el bot opera lo confirmado)"
+    dominio: 1
+    descripcion: "El bot se niega a arrancar sin evidencia confirmada; opera lo que pasó el examen con ventanas gastadas."
+    implementacion: existe
+    validacion: probada
+    operacion: medida
+    criticidad: critica
+    rutas: ["app/main.py:153-200", "research/registro.py::evidencia_confirmada", "research/registro.py::inventario"]
+    depende_de: [REQ-001]
+    consumido_por: ["runtime/loop.py", "dashboard/app/main.py (/bot)"]
+    requisitos:
+      - "Sin evidencia confirmada y sin --selection, build_bot lanza RuntimeError"
+      - "Un checkpoint no cuenta como evidencia"
+      - "Un experimento refutado nunca se opera"
+    criterios_aceptacion:
+      - "build_bot() lanza RuntimeError con los tres motivos"
+      - "El panel muestra el inventario antes del boton de arrancar"
+    tests: ["tests/test_bot_evidence_driven.py", "tests/test_registro.py"]
+    resultados_tests: "verde"
+    evidencias: ["app/main.py:171 'If no CLI selections AND no confirmed evidence exists'", "research/registro.py::inventario docstring: 'solo el primero se opera'"]
+    deficiencias:
+      - "evidencia_confirmada() no guarda QUE regla se confirmo; el bot no puede saber la estrategia, solo el par (limitacion documentada en su propio docstring)"
+    bloqueos: []
+    siguiente_accion: "Guardar la regla y sus parametros en el resultado del registro para cerrar la ultimaCMD incoherencia entre 'que par' y 'que regla'."
+    ultima_revision: "2026-10-10"
+
+  # ─────────────────── DOMINIO 2: Investigación de estrategias ───────────────────
+  - id: RES-001
+    nombre: "Motor de reglas (11 estrategias)"
+    dominio: 2
+    descripcion: "Reglas puras que producen -1/0/+1 sin ver la cuenta ni el riesgo."
+    implementacion: existe
+    validacion: probada
+    operacion: medida
+    criticidad: alta
+    rutas: ["strategies/base.py", "strategies/registry.py", "strategies/trend.py", "strategies/adaptive.py"]
+    depende_de: [IND-001]
+    consumido_por: ["runtime/loop.py", "research/sweep.py"]
+    requisitos:
+      - "Una regla por pregunta (valla: Strategy.question + tests/test_una_voz_por_pregunta.py)"
+      - "Salida discreta en {-1,0,+1}"
+    criterios_aceptacion: ["Ninguna regla duplica la pregunta de otra", "11 ids, no 18"]
+    tests: ["tests/test_una_voz_por_pregunta.py", "tests/test_registry.py"]
+    resultados_tests: "verde (4 tests en la valla de preguntas unicas)"
+    evidencias: ["config/gts.yaml:107-113 lista los 11 ids", "git log 54a2b0f 'Motor de reglas: se podan siete duplicadas'"]
+    deficiencias:
+      - "Solo 4 de las 11 tienen rejilla en el barrido (ATR_Breakout, EMA_Trend_Pullback, MA_Crossover, RSIDivergence); las otras 7 se pueden operar pero el laboratorio no sabe barrerlas"
+    bloqueos: []
+    siguiente_accion: "Ninguna urgente. La poda ya está hecha y valla."
+    ultima_revision: "2026-10-10"
+
+  - id: RES-002
+    nombre: "Barrido de parametros con correccion por pruebas multiples"
+    dominio: 2
+    descripcion: "Evalua una rejilla y corrige el p-valor por el universo entero (White + Newey-West)."
+    implementacion: existe
+    validacion: probada
+    operacion: medida
+    criticidad: critica
+    rutas: ["research/sweep.py", "research/sweep_parallel.py", "research/reality_check.py"]
+    depende_de: [RES-001, RES-003]
+    consumido_por: ["research/confirmacion.py", "research/registro.py"]
+    requisitos:
+      - "Registrar n_trials, configurations y trade_returns_b por fila"
+      - "El reparto entre procesos da EXACTAMENTE los mismos numeros que en serie"
+      - "Correr sin terminal, desde data/raw/"
+    criterios_aceptacion:
+      - "p del Reality Check sobre el universo, no el |t| del ganador aislado"
+      - "Paralelo == serie bit a bit"
+    tests: ["tests/test_reality_check.py (33)", "tests/test_sweep_parallel.py (11)", "tests/test_sweep_universe.py (19)"]
+    resultados_tests: "3 de los 11 de sweep_parallel fallan en suite completa (ver ISS-01); pasan 11/11 aislados. Los 33 de reality_check verdes."
+    evidencias:
+      - "barrido-AUDUSD-H1-entrenar-1.json: p=0.6988, n_trials=25, n_boot=10000"
+      - "barrido-AUDUSD-H1-entrenar-2.json: p=0.9980, n_trials=25"
+      - "barrido-AUDUSD-H4-entrenar-1.json: p=0.2715, n_trials=25"
+    deficiencias:
+      - "Los tres barridos en disco fallan la correccion: ningun p < 0.05. Es un resultado valido y publicable, no un defecto del motor."
+    bloqueos: []
+    siguiente_accion: "Ninguna sobre el motor. Los tres veredictos ya estan escritos."
+    ultima_revision: "2026-10-10"
+
+  - id: RES-003
+    nombre: "Reality Check de White (correccion)"
+    dominio: 2
+    descripcion: "Convierte 'el ganador de esta rejilla' en 'el maximo de este universo es distinguible del ruido'."
+    implementacion: existe
+    validacion: probada
+    operacion: medida
+    criticidad: critica
+    rutas: ["research/reality_check.py"]
+    depende_de: [RES-002]
+    consumido_por: ["research/sweep.py"]
+    requisitos:
+      - "Bootstrap de la serie de retornos por operacion"
+      - "Denominador de Newey-West"
+      - "Correccion bilateral porque la seleccion fue sobre |t|"
+    criterios_aceptacion:
+      - "Con ruido puro no rechaza"
+      - "Con un edge real entre 54 series lo detecta"
+      - "El p-valor crece de forma monotonica con N"
+    tests: ["tests/test_reality_check.py::test_a_universe_of_noise_is_not_significant", "::test_a_real_edge_in_one_of_them_is_detected", "::test_the_correction_grows_with_N"]
+    resultados_tests: "verde (33 tests)"
+    evidencias: ["README.md:635-637 'p = 0,42 con ruido, p = 0,0000 con edge real, p = 0,0003 -> 0,167 de N=1 a N=200'", "Los 3 barridos en disco traen el bloque reality_check completo"]
+    deficiencias: ["El Deflated Sharpe Ratio NO esta implementado (decision documentada: daria un segundo numero mas favorable al lado del conservador)"]
+    bloqueos: []
+    siguiente_accion: "Ninguna. Es la pieza de validacion mas solida del sistema."
+    ultima_revision: "2026-10-10"
+
+  - id: RES-004
+    nombre: "Confirmacion sobre tramo limpio (ventanas gastadas)"
+    dominio: 2
+    descripcion: "El ganador del barrido se reevalua sobre un tramo que no se uso para elegir."
+    implementacion: existe
+    validacion: probada
+    operacion: medida
+    criticidad: alta
+    rutas: ["research/confirmacion.py", "data/research/confirmacion-AUDUSD-H4-examinar-1.json"]
+    depende_de: [RES-002]
+    consumido_por: ["research/registro.py"]
+    requisitos:
+      - "El tramo de confirmacion queda 'gastada' al usarse (Regla 8)"
+      - "Un resultado con beneficio negativo se marca refutado aunque |t| pase"
+    criterios_aceptacion: ["veredicto en {confirmada, refutada}", "min_operaciones=30 declarado"]
+    tests: ["tests/test_confirmacion.py"]
+    resultados_tests: "verde"
+    evidencias: ["confirmacion-AUDUSD-H4-examinar-1.json: MA_Crossover refutada, t=-0.488, beneficio neto -0.0147, 565 operaciones, 'beneficio neto negativo con 565 operaciones'"]
+    deficiencias: []
+    bloqueos: []
+    siguiente_accion: "Ninguna. La unica confirmacion ejecutada refute correctamente, que es lo que se le pedia."
+    ultima_revision: "2026-10-10"
+
+  # ─────────────────────── DOMINIO 3: Datos de mercado ───────────────────────
+  - id: DAT-001
+    nombre: "Dataset de barras con procedencia declarada"
+    dominio: 3
+    descripcion: "8 CSVs en data/raw con origen, rango y numero de barras declarados."
+    implementacion: existe
+    validacion: probada
+    operacion: medida
+    criticidad: alta
+    rutas: ["data/raw/", "data/raw/provenance.yaml", "scripts/download_data.py"]
+    depende_de: [MT5-001]
+    consumido_por: ["research/", "training/", "dashboard"]
+    requisitos:
+      - "Cada CSV declara broker y rango"
+      - "El origen se escribe automatico desde la descarga"
+    criterios_aceptacion: ["provenance.yaml lista cada fichero con range y bars"]
+    tests: ["tests/test_window_loader.py", "tests/test_provenance.py"]
+    resultados_tests: "verde"
+    evidencias:
+      - "provenance.yaml: 8 ficheros declarados; AUDUSD_H1 54490 barras 2018-01-02..2026-10-08"
+      - "El fichero declara la firma del feed demo: 'EURUSD reporta spread cero en el 51.5% de las barras'"
+    deficiencias:
+      - "La columna 'spread' del feed demo NO sirve para costear (declarado en el propio provenance.yaml); el costeo usa el suelo de pips de brokers/metaquotes-demo.yaml"
+      - "AUDUSD_H4 termina en 2021-12-31: 5 anos de solape con el resto del arbol"
+    bloqueos: []
+    siguiente_accion: "Ninguna. La honestidad del dato esta mejor documentada que la media."
+    ultima_revision: "2026-10-10"
+
+  - id: DAT-002
+    nombre: "Puerta de lectura de CSV (data gate)"
+    dominio: 3
+    descripcion: "Un solo camino para leer barras, con control de formato y columnas."
+    implementacion: existe
+    validacion: probada
+    operacion: medida
+    criticidad: media
+    rutas: ["research/window.py", "scripts/add_csv_header.py"]
+    depende_de: []
+    consumido_por: ["research/sweep.py", "research/replay.py", "scripts/"]
+    requisitos: ["Ningun modulo lee CSV con pd.read_csv directo sin pasar por la puerta"]
+    criterios_aceptacion: ["Una sola implementacion de carga"]
+    tests: ["tests/test_window_loader.py (14)"]
+    resultados_tests: "verde"
+    evidencias: ["memory-graph.jsonl entidad 'puerta-de-csv-lectura'"]
+    deficiencias: []
+    bloqueos: []
+    siguiente_accion: "Ninguna."
+    ultima_revision: "2026-10-10"
+
+  # ───────────────────── DOMINIO 4: Features e ingenieria ─────────────────────
+  - id: FEAT-001
+    nombre: "Extractor universal de features"
+    dominio: 4
+    descripcion: "Calcula el vector de features normalizado por clase de activo."
+    implementacion: existe
+    validacion: probada
+    operacion: medida
+    criticidad: alta
+    rutas: ["core/features/universal_extractor.py", "core/features/asset_specs.py", "core/features/normalizers.py"]
+    depende_de: [DAT-001]
+    consumido_por: ["training/train_universal.py", "dashboard/app/inference.py", "research/dataset.py"]
+    requisitos:
+      - "Un normalizador por clase de activo, no uno global"
+      - "El scaler viaja con su checkpoint"
+    criterios_aceptacion:
+      - "El scaler se ajusta SOLO con la parte de entrenamiento"
+      - "Un scaler por simbolo dentro de su clase"
+    tests: ["tests/test_scaler_canonical.py", "tests/test_scaler_fit_scope.py"]
+    resultados_tests: "verde (16 tests citados en README:397)"
+    evidencias:
+      - "git log 20ba4fa 'Fix 1 cerrado: el scaler viaja con su checkpoint'"
+      - "README.md:397 'separacion de 0,131' con datos reales"
+      - "bugs normalizer-leakage y scaler-shared-across-symbols: ARREGLADOS"
+    deficiencias:
+      - "Ninguna feature tiene poder predictivo univariante por encima de AUC 0.54 en direccion (medido, README:379)"
+    bloqueos: []
+    siguiente_accion: "Ninguna. El leakage de features es el hueco que mas trabajo costo y esta cerrado con valla."
+    ultima_revision: "2026-10-10"
+
+  - id: FEAT-002
+    nombre: "Mapa de timeframes y limites de representacion"
+    dominio: 4
+    descripcion: "Traduce (timeframe, simbolo) a indices de embedding, con error nombrado cuando no cabe."
+    implementacion: existe
+    validacion: probada
+    operacion: No evaluado
+    criticidad: media
+    rutas: ["core/features/asset_specs.py"]
+    depende_de: []
+    consumido_por: ["core/universal/universal_model.py", "dashboard/app/inference.py"]
+    requisitos:
+      - "max_timeframes=8 NO se deriva de TIMEFRAME_SECONDS (romperia los checkpoints)"
+      - "MN1 falla con TimeframeNotRepresentableError nombrando timeframe, indice y tamano"
+    criterios_aceptacion: ["El test comprueba la forma del embedding entrenado contra el codigo"]
+    tests: ["tests/test_timeframe_index.py (17)"]
+    resultados_tests: "verde"
+    evidencias: ["README.md:476-508 'el arreglo que proponia este bug habria sido peor que el bug'", "test_derivar_el_tamano_romperia_los_checkpoints_es_la_razon_del_8"]
+    deficiencias: ["El pump del panel sigue capturando except Exception sin distinguir config de transitorio (subtarea abierta, README:493)"]
+    bloqueos: []
+    siguiente_accion: "Cerrar la 3a subtarea de mn1-index-out-of-range cuando app/main.py tenga trabajo sin commitear."
+    ultima_revision: "2026-10-10"
+
+  # ─────────────────── DOMINIO 5: Modelo ML / IA ───────────────────
+  - id: ML-001
+    nombre: "Transformer multi-activo (3.9M parametros)"
+    dominio: 5
+    descripcion: "UniversalModel con cabezas de direccion, volatilidad y regimen."
+    implementacion: existe
+    validacion: probada
+    operacion: medida
+    criticidad: alta
+    rutas: ["core/universal/universal_model.py", "core/universal/model_registry.py", "core/heads/multi_head.py", "training/train_universal.py"]
+    depende_de: [FEAT-001]
+    consumido_por: ["research/backtest_v2.py", "scripts/walkforward_eval.py", "dashboard/app/inference.py"]
+    requisitos:
+      - "El manifiesto del checkpoint declara su vocabulario y su lookback"
+      - "El scaler viaja dentro del checkpoint"
+    criterios_aceptacion: ["El checkpoint carga con su config, no con supuestos"]
+    tests: ["tests/test_training_provenance.py", "tests/test_train_pipeline_wiring.py", "tests/test_checkpoint_provenance.py"]
+    resultados_tests: "verde"
+    evidencias:
+      - "checkpoints_training/best_model.pt: epoch 0, de un run con early stop que paro cerca de la 10"
+      - "core/model_manifest.py"
+    deficiencias:
+      - "3.9M parametros alimentados por 20 features de entrada"
+      - "La atencion cross-asset existe pero recibe ceros"
+      - "20 features para 3.9M parametros es una relacion que ningun barrido de regularizacion rescata solo"
+    bloqueos: []
+    siguiente_accion: "Ninguna hasta resolver ISS-02 (tramo fuera de muestra)."
+    ultima_revision: "2026-10-10"
+
+  - id: ML-002
+    nombre: "Habilidad de la cabeza de direccion"
+    dominio: 5
+    descripcion: "¿El modelo predice direccion de forma medible?"
+    implementacion: existe
+    validacion: probada
+    operacion: medida
+    criticidad: critica
+    rutas: ["research/signal_exists.py", "research/skill_check.py", "data/research/archive/walkforward-H1-modelo-medido-20261010.json"]
+    depende_de: [ML-001, VAL-002]
+    consumido_por: ["config/gts.yaml (decision de source: rules)"]
+    requisitos:
+      - "Un resultado se declara por su p-valor, no por su |t| aislado"
+      - "Un control positivo demuestra que el pipeline puede detectar senal"
+    criterios_aceptacion:
+      - "La ventaja en direccion debe superar el suelo de ruido tras correccion"
+      - "El control positivo (cabeza de volatilidad) debe salir positivo"
+    tests: ["tests/test_skill_check.py", "tests/test_signal_exists.py"]
+    resultados_tests: "verde (los tests miden el numero, no lo approve)"
+    evidencias:
+      - "VEREDICTO NEGATIVO MEDIDO: Sharpe OOS = -0.064 +- 1.363 (medido), -0.067 (conservador), sobre 28 folds"
+      - "Control positivo: cabeza de volatilidad +3.7 a +5.4 puntos (research/signal_exists.py)"
+      - "Entrenar mas empeora: 1 epoca +0.162%/op a 61.5% acierto; 5 epocas -0.740% a 36.1% (research/skill_check.py)"
+      - "README.md:366 'La cabeza de direccion no tiene habilidad predictiva'"
+      - "Experimento 'more-training-makes-it-worse': status refuted"
+    deficiencias:
+      - "El sistema NO puede decidir si la cabeza de volatilidad sirve: el experimento vol-head-product esta bloqueado por falta de tramo reservado (README:879)"
+    bloqueos: [ISS-02]
+    siguiente_accion: "Ninguna hasta que exista un tramo fuera de muestra. Sin ese tramo la pregunta no tiene respuesta valida."
+    ultima_revision: "2026-10-10"
+
+  - id: ML-003
+    nombre: "Bundle de entrenamiento reproducible (Colab/Kaggle)"
+    dominio: 5
+    descripcion: "Empaqueta codigo y datos para entrenar en GPU externo."
+    implementacion: existe
+    validacion: probada
+    operacion: No evaluado
+    criticidad: media
+    rutas: ["colab/build_bundle.py", "colab/gts_train_colab.ipynb", "kaggle/kernel/gts_train.ipynb", "gts/BUNDLE_VERSION.txt"]
+    depende_de: [ML-001]
+    consumido_por: ["kaggle/kernel/gts_train.ipynb"]
+    requisitos:
+      - "El bundle lleva solo lo que se entrena"
+      - "BUNDLE_VERSION.txt declara el commit de origen"
+    criterios_aceptacion: ["El bundle ejecuta el notebook sin intervencion manual"]
+    tests: ["tests/test_colab_bundle.py", "tests/test_kaggle_layout.py"]
+    resultados_tests: "verde, pero CONTAMINA la suite (ver ISS-01)"
+    evidencias: ["gts/BUNDLE_VERSION.txt = 'commit 44f8591'", "13 ficheros del bundle divergen de la raiz (medido hoy)"]
+    deficiencias:
+      - "El bundle en gts/ esta 6h24m por detras de la raiz (09:31 vs 15:55 del 2026-10-10)"
+      - "Es la causa raiz de los 3 tests que fallan"
+    bloqueos: []
+    siguiente_accion: "Ver ISS-01. Es la tarea mas barata de la lista con mas superficie."
+    ultima_revision: "2026-10-10"
+
+  # ───────────────────── DOMINIO 6: Construccion de portafolio ─────────────────────
+  - id: PORT-001
+    nombre: "Optimizador de cartera"
+    dominio: 6
+    descripcion: "Reparte riesgo entre activos por correlacion, con topes de peso y riesgo total."
+    implementacion: parcial
+    validacion: no_probada
+    operacion: no_operativa
+    criticidad: media
+    rutas: ["risk/portfolio_optimizer.py", "app/decision_core.py:470", "config/gts.yaml:431-437"]
+    depende_de: [RES-001]
+    consumido_por: ["app/decision_core.py"]
+    requisitos:
+      - "max_portfolio_risk y max_symbol_weight se aplican de verdad"
+      - "No se traga el AttributeError"
+    criterios_aceptacion:
+      - "Un test que demuestre que los topes cambian el resultado"
+      - "Ninguna excepcion silenciada en la ruta"
+    tests: []
+    resultados_tests: "NINGUN TEST. No evaluado en ejecucion."
+    evidencias:
+      - "config/gts.yaml:432 'enabled: true'"
+      - "audit/PHASE1-REPORT.md H6: leia context.signal_value, campo inexistente en DecisionContext (17 campos); AttributeError capturado y silenciado"
+      - "REVISADO HOY: signal_value EXISTE ahora en app/decision_core.py:59. La premisa de H6 es PARCIALMENTE obsoleta. Lo que queda por verificar es si los topes se aplican y si la excepcion se sigue tragando."
+    deficiencias:
+      - "Sin tests. Es el unico componente de riesgo sin ninguna valla."
+      - "Su correcto funcionamiento NO esta verificado"
+    bloqueos: []
+    siguiente_accion: "Verificar en ejecucion si la rama se ejecuta y si los limites se aplican. No asumir que esta arreglado ni que esta roto."
+    ultima_revision: "2026-10-10"
+
+  # ───────────────────────── DOMINIO 7: Backtesting ─────────────────────────
+  - id: BT-001
+    nombre: "Motor de backtest con purga y embargo"
+    dominio: 7
+    descripcion: "Evalua una serie barra a barra con sellos de purga entre train y test."
+    implementacion: existe
+    validacion: probada
+    operacion: medida
+    criticidad: alta
+    rutas: ["research/backtest_v2.py", "research/purged_sweep.py", "research/dataset.py"]
+    depende_de: [DAT-001, DAT-002]
+    consumido_por: ["research/sweep.py", "scripts/walkforward_eval.py"]
+    requisitos:
+      - "El purgado es aritmetico sobre posiciones, no comparacion de timestamps"
+      - "Un holdout de label que cruza un fin de semana es invisible al timestamp"
+    criterios_aceptacion: ["verify_purged acepta la separacion declarada"]
+    tests: ["tests/test_sweep_universe.py", "tests/test_backtest_position_book.py"]
+    resultados_tests: "verde"
+    evidencias: ["pyproject per-file-ignores explica por que verify_purged recibe el indice de barra"]
+    deficiencias: []
+    bloqueos: []
+    siguiente_accion: "Ninguna."
+    ultima_revision: "2026-10-10"
+
+  - id: BT-002
+    nombre: "Paridad replay <-> backtest <-> simulacion"
+    dominio: 7
+    descripcion: "El mismo trade debe dar el mismo PnL neto por los tres caminos."
+    implementacion: existe
+    validacion: DEBIL
+    operacion: medida
+    criticidad: alta
+    rutas: ["tests/test_trade_tape_equivalencia.py", "tests/test_cost_conformity.py", "research/trade_tape.py"]
+    depende_de: [COST-001]
+    consumido_por: []
+    requisitos:
+      - "Un test que construya el motor del backtest y lo compare con la simulacion"
+    criterios_aceptacion:
+      - "El test de conformidad EJERCE PurgedWalkForwardBacktest, no trade_costs"
+    tests: ["tests/test_cost_conformity.py", "tests/test_trade_tape_equivalencia.py"]
+    resultados_tests:
+      - "test_cost_conformity.py: COLECCIONA (2 tests), pero _neto_backtest_usd() calcula el bruto A MANO y llama a trade_costs. NUNCA construye el motor del backtest."
+    evidencias:
+      - "tests/test_cost_conformity.py:49-67 _neto_backtest_usd() -- importa PurgedWalkForwardBacktest en la linea 25 pero no lo usa"
+      - "audit/PHASE1-REPORT.md H7: 'El test que se presenta como criterio de aceptacion de la conformidad entre los dos motores no ejerce el motor del backtest'"
+    deficiencias:
+      - "VACUO POR CONSTRUCCION: el test que debe garantizar la conformidad de costes entre los dos motores no ejecuta ninguno de los dos motores de backtest"
+    bloqueos: []
+    siguiente_accion: "Reescribir _neto_backtest_usd() para que el bruto venga de PurgedWalkForwardBacktest. Es el test que sostiene la afirmación 'costeo unificado'."
+    ultima_revision: "2026-10-10"
+
+  - id: BT-003
+    nombre: "Contrato de operaciones (TradeTape) y reloj de pared"
+    dominio: 7
+    descripcion: "Una cinta de operaciones comparable entre replay y produccion, con reloj fuera del replay."
+    implementacion: existe
+    validacion: probada
+    operacion: medida
+    criticidad: media
+    rutas: ["research/trade_tape.py", "scripts/verify_backtest_regression.py"]
+    depende_de: [BT-002]
+    consumido_por: ["tests/test_trade_tape_equivalencia.py (11)"]
+    requisitos: ["El reloj de pared no se congela durante el replay"]
+    criterios_aceptacion: ["La cinta serializa a JSON y vuelve sin perdida"]
+    tests: ["tests/test_trade_tape_equivalencia.py"]
+    resultados_tests: "verde"
+    evidencias: ["git log b2fc271 'TradeTape: el contrato de operaciones, y un reloj de pared fuera del replay'"]
+    deficiencias: []
+    bloqueos: []
+    siguiente_accion: "Ninguna."
+    ultima_revision: "2026-10-10"
+
+  # ───────────── DOMINIO 8: Validacion y robustez estadistica ─────────────
+  - id: VAL-001
+    nombre: "Registro de experimentos con ventanas gastadas (Regla 8)"
+    dominio: 8
+    descripcion: "Un tramo usado para elegir queda marcado y no se vuelve a usar para elegir."
+    implementacion: existe
+    validacion: probada
+    operacion: medida
+    criticidad: critica
+    rutas: ["research/registro.py", "data/research/registro-experimentos.json"]
+    depende_de: []
+    consumido_por: ["app/main.py:192", "dashboard/app/experimentos.py"]
+    requisitos:
+      - "Un tramo gastado no puede volver a ser tramo de seleccion"
+      - "El numero de ensayos se declara ANTES de la corrida"
+    criterios_aceptacion:
+      - "historial_ensayos acumula, nunca sobrescribe"
+      - "estado in {limpia, gastada} con motivo y fecha"
+    tests: ["tests/test_registro.py", "tests/test_control_negativo.py"]
+    resultados_tests: "verde"
+    evidencias:
+      - "registro-experimentos.json: EURUSD M15 histograms 2 barridos de 25; AUDUSD H1 = 100+25+25 = 150 ensayos declarados"
+      - "Los 3 tramos de EURUSD M15/seleccion y de AUDUSD H1 estan 'gastada' con motivo y fecha"
+    deficiencias: ["El control negativo (research/control_negativo.py) existe; su cobertura no fue auditada hoy"]
+    bloqueos: []
+    siguiente_accion: "Ninguna. Es la valla de conteo mas importante del sistema."
+    ultima_revision: "2026-10-10"
+
+  - id: VAL-002
+    nombre: "Walk-forward con purga y etiquetas in/out-of-sample"
+    dominio: 8
+    descripcion: "148 folds repartidos en dentro/fuera de muestra, con aggregate honesto."
+    implementacion: existe
+    validacion: DEBIL
+    operacion: medida
+    criticidad: critica
+    rutas: ["research/walkforward.py", "research/backtest_v2.py", "scripts/walkforward_eval.py"]
+    depende_de: [BT-001, ML-001]
+    consumido_por: ["dashboard", "README"]
+    requisitos:
+      - "El modelo se reentrena por fold (NO CUMPLIDO)"
+      - "El aggregate separa las dos poblaciones (CUMPLIDO)"
+    criterios_aceptacion:
+      - "Un fold cuenta como OOS solo si su test empieza despues del FIN de la validacion"
+      - "El aggregate declara cuantos folds hay de cada tipo"
+    tests: ["tests/test_walkforward.py", "tests/test_scaler_fit_scope.py"]
+    resultados_tests: "verde en lo que mide; el defecto es de diseño, no de test"
+    evidencias:
+      - "148 folds: 112 dentro, 28 fuera (medido hoy en el fichero)"
+      - "Sharpe OOS -0.064 +- 1.363 (medido) / -0.067 (conservador)"
+      - "selection_note del propio fichero: 'los folds llamados out-of-sample no lo son para ese checkpoint'"
+      - "scripts/_why_oos_beats_is.py: solo 12 de 148 folds (8.1%) caen en barras que el modelo no vio en ninguna capacidad"
+    deficiencias:
+      - "NO REENTRENA POR FOLD: el checkpoint se carga una vez y se evalua sobre la serie entera (bug walk-forward-not-retrained, sigue abierto)"
+      - "El epoch del checkpoint se eligio sobre el mismo tramo que los folds OOS tachan de fuera de muestra"
+    bloqueos: [ISS-02]
+    siguiente_accion: "ISS-02. Sin un tramo que no entre ni en entrenamiento ni en seleccion, todo el dominio 8 no puede avanzar."
+    ultima_revision: "2026-10-10"
+
+  - id: VAL-003
+    nombre: "Minimum Backtest Length"
+    dominio: 8
+    descripcion: "Responde cuanto habria que durar un backtest para distinguir un Sharpe del cero."
+    implementacion: existe
+    validacion: probada
+    operacion: No evaluado
+    criticidad: media
+    rutas: ["research/minimum_backtest_length.py"]
+    depende_de: [RES-002]
+    consumido_por: []
+    requisitos: ["Por diseno NO corrige por seleccion: responde sobre el experimento, no sobre la estrategia"]
+    criterios_aceptacion: ["Declara que no corrige"]
+    tests: ["tests/test_minimum_backtest_length.py"]
+    resultados_tests: "verde"
+    evidencias: ["README.md:392 'por diseño NO corrige por selección'", "README.md:616 explica por que se implemento esto y no el Deflated Sharpe Ratio"]
+    deficiencias: ["No ejecutado sobre ninguna regla concreta (No evaluado)"]
+    bloqueos: []
+    siguiente_accion: "Correrlo sobre las tres reglas que ya tienen veredicto para tener una cifra de quantas barras harian falta."
+    ultima_revision: "2026-10-10"
+
+  - id: VAL-004
+    nombre: "Monte Carlo y stress test"
+    dominio: 8
+    descripcion: "Remuestreo de la serie de retornos y escenarios adversos."
+    implementacion: existe
+    validacion: no_probada
+    operacion: No evaluado
+    criticidad: media
+    rutas: ["research/backtest_v2.py (mc_metrics, stress_results)"]
+    depende_de: [VAL-002]
+    consumido_por: []
+    requisitos: ["Necesita la serie de retornos barra a barra de cada operacion"]
+    criterios_aceptacion: ["Se ejecuta sobre al menos un resultado real"]
+    tests: []
+    resultados_tests: "NINGUN TEST DEDICADO"
+    evidencias: ["Los ficheros walkforward-*-20261010.json traen mc_metrics y stress_results: el codigo CORRIO al menos una vez"]
+    dependencias_pendientes:
+      - "El README (linea 396) dice que nunca se han ejecutado porque faltaba la serie de retornos. El fichero de hoy SI trae mc_metrics y stress_results, lo que sugiere que la limitacion ya se resolvio. No verificado a que coste."
+    bloqueos: []
+    siguiente_accion: "Verificar que mc_metrics y stress_results de los ficheros de hoy tienen contenido real y no ceros."
+    ultima_revision: "2026-10-10"
+
+  # ────────────────────────── DOMINIO 9: Riesgo ──────────────────────────
+  - id: RISK-001
+    nombre: "Motor de riesgo con 11 validadores"
+    dominio: 9
+    descripcion: "Ninguna orden sale sin pasar los 11 validadores configurables."
+    implementacion: existe
+    validacion: probada
+    operacion: No evaluado
+    criticidad: critica
+    rutas: ["risk/engine.py", "risk/validators.py"]
+    depende_de: []
+    consumido_por: ["app/decision_core.py", "app/main.py:571"]
+    requisitos:
+      - "Cada validador se puede desactivar por configuracion, y eso es una decision explicita"
+      - "El resultado de la validacion se journaliza"
+    criterios_aceptacion:
+      - "Los 11 validadores existen, estan cableados y se pueden probar por separado"
+    tests: ["tests/test_validators.py (78)", "tests/test_emergency_stop.py"]
+    resultados_tests: "verde"
+    evidencias:
+      - "risk/engine.py usa V.check_ en 11 llamadas: spread, volatility, session, drawdown, day_loss, max_open_positions, per_symbol, margin, min_sl_distance, trade_count, consecutive_losses (medido hoy)"
+      - "risk/validators.py: 11 funciones publicas (medido hoy)"
+      - "app/main.py:576 journaliza '{verdict.rejection}: {verdict.detail}'"
+    deficiencias:
+      - "Los 11 se pueden DESACTIVAR desde el panel sin autenticacion (ver ISS-02/SEG-001)"
+    bloqueos: []
+    siguiente_accion: "Ninguna sobre el motor. Es solido."
+    ultima_revision: "2026-10-10"
+
+  - id: RISK-002
+    nombre: "Dimensionado de posicion (sizer)"
+    dominio: 9
+    descripcion: "Calcula el tamano a partir del riesgo y el ATR, con la regla de orden correcta."
+    implementacion: existe
+    validacion: probada
+    operacion: No evaluado
+    criticidad: alta
+    rutas: ["risk/sizer.py"]
+    depende_de: [RISK-001]
+    consumido_por: ["app/decision_core.py", "simulation/portfolio.py"]
+    requisitos: ["El stop va en el lado correcto porque el llamador lo coloca"]
+    criterios_aceptacion: ["plan(side) devuelve stop del lado correcto"]
+    tests: ["tests/test_sizer.py"]
+    resultados_tests: "verde"
+    evidencias: ["pyproject per-file-ignores: 'risk/sizer.py' = ['ARG002'] con la razon escrita"]
+    deficiencias: []
+    bloqueos: []
+    siguiente_accion: "Ninguna."
+    ultima_revision: "2026-10-10"
+
+  - id: RISK-003
+    nombre: "Killswitch / parada de emergencia"
+    dominio: 9
+    descripcion: "Acciones de control: pause, resume, flatten. Solo tres verbos."
+    implementacion: existe
+    validacion: probada
+    operacion: No evaluado
+    criticidad: alta
+    rutas: ["runtime/control.py", "runtime/loop.py", "app/decision_core.py"]
+    depende_de: [CTL-001]
+    consumido_por: ["dashboard/app/main.py (POST /api/bot/*)"]
+    requisitos:
+      - "Solo pause/resume/flatten; no hay un cuarto verbo"
+      - "Flatten no acepta ticket: un cierre dirigible cerraria la operacion manual del operador"
+    criterios_aceptacion: ["El aplanado responde de todo lo que lleva su numero magico"]
+    tests: ["tests/test_emergency_stop.py", "tests/test_confirmacion.py"]
+    resultados_tests: "verde"
+    evidencias: ["runtime/control.py:43 ControlAction = Literal['pause','resume','flatten']", "README.md:136-138 explica por que flatten no lleva ticket"]
+    deficiencias: []
+    bloqueos: []
+    siguiente_accion: "Ninguna."
+    ultima_revision: "2026-10-10"
+
+  # ─────────────── DOMINIO 10: Ejecucion y conectividad MT5 ───────────────
+  - id: MT5-001
+    nombre: "Terminal MT5: ciclo de vida y feed de barras"
+    dominio: 10
+    descripcion: "Conecta, vigila y entrega barras cerradas."
+    implementacion: existe
+    validacion: probada
+    operacion: No evaluado
+    criticidad: alta
+    rutas: ["mt5/terminal.py", "mt5/feed.py"]
+    depende_de: []
+    consumido_por: ["runtime/loop.py", "dashboard/app/mt5_engine.py", "scripts/download_mt5_data.py"]
+    requisitos:
+      - "La barra en formacion se descarta (start_pos=1)"
+      - "copy_rates_from_pos(...,0,count) devuelve la en formacion"
+    criterios_aceptacion: ["La hora de cierre de la barra mostrada esta en el pasado"]
+    tests: ["tests/test_terminal_invariants.py (9)", "tests/test_connection_watchdog.py", "tests/test_replay_fast_path.py"]
+    resultados_tests: "verde"
+    evidencias: ["bug forming-bar-shown-as-closed: el bot la descarta, la tabla de senales la muestra como cerrada", "README.md:577-587"]
+    deficiencias:
+      - "forming-bar-shown-as-closed sigue ABIERTO (el arreglo 'empezar en 1' no esta aplicado al panel)"
+      - "bar_close_time lleva la APERTURA de la barra, no el cierre (bug abierto, bajo impacto)"
+    bloqueos: []
+    siguiente_accion: "Ninguna urgente. Ambos bugs son de presentacion, no de decision."
+    ultima_revision: "2026-10-10"
+
+  - id: MT5-002
+    nombre: "Ejecucion real (live)"
+    dominio: 10
+    descripcion: "La UNICA clase que puede enviar ordenes. Apagada."
+    implementacion: existe
+    validacion: probada
+    operacion: no_operativa
+    criticidad: critica
+    rutas: ["live/execution.py", "live/terminal.py"]
+    depende_de: [MT5-001, RISK-001]
+    consumido_por: ["simulation/broker_book.py (importa live.execution a nivel de modulo)"]
+    requisitos:
+      - "live.enabled=false + allow_funded=false = dos cerrojos"
+      - "Solo 1 modulo puede escribir ordenes"
+    criterios_aceptacion:
+      - "Un test verifica que solo UN modulo contiene order_send"
+      - "El camino esta cerrado por construccion, no por bandera"
+    tests: ["tests/test_no_order_path.py", "tests/test_research_cannot_trade.py", "tests/test_live_execution.py"]
+    resultados_tests: "verde (con la trampa del basetemp conhecida)"
+    evidencias:
+      - "config/gts.yaml:363 live.enabled: false; :367 allow_funded: false"
+      - "live/terminal.py:110-119 contiene el unico order_send"
+      - "tests/test_research_cannot_trade.py::test_still_exactly_one_module_can_write: FALSO POSITIVO si el basetemp esta dentro del repo (GitHub, medido 2026-10-09)"
+    deficiencias:
+      - "simulation/broker_book.py:66 importa live.execution a nivel de modulo; la lista de prohibidos del test NO incluye live.execution (D5 de la auditoria anterior, sin verificar si se cerro)"
+    bloqueos: []
+    siguiente_accion: "Verificar si la lista de prohibidos ya incluye live.execution. Si no, anadirla."
+    ultima_revision: "2026-10-10"
+
+  # ──────────────── DOMINIO 11: Contabilidad y analisis ────────────────
+  - id: ACC-001
+    nombre: "Libro simulado con equity y costes"
+    dominio: 11
+    descripcion: "Ejecucion contra un libro en memoria: equity, contabilidad de lado, arrastre de costes."
+    implementacion: existe
+    validacion: probada
+    operacion: No evaluado
+    criticidad: alta
+    rutas: ["simulation/portfolio.py", "simulation/broker_book.py"]
+    depende_de: [COST-001]
+    consumido_por: ["runtime/loop.py"]
+    requisitos: ["Cobra el spread en los precios: abre al ask, cierra al bid"]
+    criterios_aceptacion: ["La contabilidad de lado cierra (neto = bruto - costes)"]
+    tests: ["tests/test_broker_book.py", "tests/test_equity_and_fill_side.py", "tests/test_backtest_position_book.py", "tests/test_reversal_actually_reverses.py"]
+    resultados_tests: "verde"
+    evidencias: ["tests/test_cost_conformity.py::_neto_simulacion_usd construye el libro de verdad y usa el spread DEL MODULO"]
+    deficiencias: []
+    bloqueos: []
+    siguiente_accion: "Ninguna."
+    ultima_revision: "2026-10-10"
+
+  - id: ACC-002
+    nombre: "Diario de decisiones con cadena de hash"
+    dominio: 11
+    descripcion: "Cada barra procesada deja una entrada encadenada por hash."
+    implementacion: existe
+    validacion: probada
+    operacion: NO MEDIDA
+    criticidad: alta
+    rutas: ["storage/journal.py", "data/journal/decisions.jsonl"]
+    depende_de: []
+    consumido_por: ["dashboard/journal_reader.py", "dashboard/app/main.py (/journal)"]
+    requisitos:
+      - "La cadena se verifica al leer"
+      - "Cada entrada lleva signal_source: rule | panel_model | none"
+    criterios_aceptacion: ["Una entrada alterada rompe la verificacion"]
+    tests: ["tests/test_journal_contract.py"]
+    resultados_tests: "verde (sobre entradas sinteticas)"
+    evidencias:
+      - "data/journal/decisions.jsonl = 0 BYTES: la cadena NO esta comprobada contra datos reales (medido hoy)"
+      - "data/control/state.json: heartbeat 2026-10-02, strategy panel_model (obsoleto), decisions: 3"
+    deficiencias:
+      - "El journal esta VACIO. El test verifica el contrato, no una sesion real."
+      - "Se trunca en cada arranque: no hay historial entre ejecuciones"
+    bloqueos: []
+    siguiente_accion: "Una sesion real del bot con el journal encendido es lo que convierte esta valla en evidencia."
+    ultima_revision: "2026-10-10"
+
+  # ───────────── DOMINIO 12: Controlador del bot y posiciones ─────────────
+  - id: CTL-001
+    nombre: "Bucle multi-simbolo con heartbeat"
+    dominio: 12
+    descripcion: "Itera simbolos, mantiene una cartera por simbolo, journaliza cada barra."
+    implementacion: existe
+    validacion: probada
+    operacion: No evaluado
+    criticidad: critica
+    rutas: ["runtime/loop.py", "runtime/reconcile.py", "runtime/selection.py"]
+    depende_de: [MT5-001, DEC-001]
+    consumido_por: ["app/main.py"]
+    requisitos:
+      - "Heartbeat con gestion de excepciones"
+      - "Reconciliacion antes de actuar"
+      - "un lock de instancia"
+    criterios_aceptacion:
+      - "Dos instancias no pueden operar a la vez"
+      - "Una barra que falla no se degrada y se recupera en la misma llamada (arreglado)"
+    tests: ["tests/test_loop_heartbeat.py", "tests/test_reconcile.py", "tests/test_instance_lock.py", "tests/test_control_clock.py"]
+    resultados_tests: "verde"
+    evidencias:
+      - "app/main.py:699 reconcilia y publica 'fail_reason: none' si es seguro"
+      - "bug la-degradacion-se-limpiaba-a-si-misma: ARREGLADO"
+      - "bug la-inversion-no-ocurriria-nunca: ARREGLADO (el bucle pedia un argumento de mas al voltear)"
+    deficiencias: []
+    bloqueos: []
+    siguiente_accion: "Ninguna."
+    ultima_revision: "2026-10-10"
+
+  - id: CTL-002
+    nombre: "Canal de control por ficheros"
+    dominio: 12
+    descripcion: "El panel escribe, el bot lee y responde. Tres verbos, con acuse de recibo."
+    implementacion: existe
+    validacion: probada
+    operacion: No evaluado
+    criticidad: alta
+    rutas: ["runtime/control.py", "dashboard/control_channel.py", "data/control/README.md"]
+    depende_de: []
+    consumido_por: ["app/main.py", "dashboard/app/main.py"]
+    requisitos: ["El panel NO escribe el heartbeat del bot"]
+    criterios_aceptacion: ["PanelControl no tiene publish"]
+    tests: ["tests/test_confirmacion.py", "tests/test_control_clock.py"]
+    resultados_tests: "verde"
+    evidencias: ["README.md:147-149 'PanelControl no tiene publish'", "data/control/README.md documenta el contrato exacto"]
+    deficiencias: []
+    bloqueos: []
+    siguiente_accion: "Ninguna. El contrato esta escrito en tres sitios y vallaado."
+    ultima_revision: "2026-10-10"
+
+  # ─────────────── DOMINIO 13: Observabilidad y diagnostico ───────────────
+  - id: OBS-001
+    nombre: "Panel web de solo lectura (84 rutas)"
+    dominio: 13
+    descripcion: "FastAPI + Jinja2 + HTMX. Ve la cuenta y el bot; no opera."
+    implementacion: existe
+    validacion: probada
+    operacion: medida
+    criticidad: alta
+    rutas: ["dashboard/app/main.py", "dashboard/app/mt5_engine.py", "dashboard/run.py"]
+    depende_de: [MT5-001, CTL-002]
+    consumido_por: ["operador"]
+    requisitos:
+      - "CERO rutas de orden (D-015)"
+      - "Enlaza a 127.0.0.1"
+      - "No puede escribir el heartbeat del bot"
+    criterios_aceptacion:
+      - "El test que lo afirma nombra el fichero explicitamente y FALLA si falta"
+    tests: ["dashboard/tests (22 ficheros)"]
+    resultados_tests: "411/411 VERDE (medido hoy)"
+    evidencias:
+      - "84 rutas contadas; 0 de orden (medido hoy)"
+      - "dashboard/app/config.py: gts_host default '127.0.0.1'"
+      - "test_no_order_path.py::test_the_panel_has_no_order_route nombra dashboard/app/main.py"
+    deficiencias: []
+    bloqueos: []
+    siguiente_accion: "Ninguna. El panel es la pieza mas solida del sistema."
+    ultima_revision: "2026-10-10"
+
+  - id: OBS-002
+    nombre: "Visor de logs multi-fichero"
+    dominio: 13
+    descripcion: "Cinco logs del sistema en una vista con selector."
+    implementacion: existe
+    validacion: probada
+    operacion: medida
+    criticidad: baja
+    rutas: ["dashboard/app/main.py (LOG_SOURCES)", "dashboard/log_reader.py", "data/logs/"]
+    depende_de: [OBS-001]
+    consumido_por: ["operador"]
+    requisitos: ["Solo claves conocidas; sin path traversal"]
+    criterios_aceptacion: ["Un source desconocido cae al panel, no a un 500"]
+    tests: ["dashboard/tests/test_logs_multifichero.py (12)"]
+    resultados_tests: "verde"
+    evidencias: ["LOG_SOURCES tiene 5 entradas (medido hoy)"]
+    deficiencias:
+      - "El filtro de niveles solo funciona en panel.log: el training escribe 'INFO __main__' y el filtro busca ' - NIVEL - '. Los logs del bot traen un aviso, no un filtro que no filtra."
+      - "La clave 'training' apunta a data/logs/training.log (10-08) mientras el ultimo entrenamiento escribio en data/control/training_run.log (10-09)"
+    bloqueos: []
+    siguiente_accion: "Apuntar la clave 'training' al fichero que el entrenamiento escribe de verdad."
+    ultima_revision: "2026-10-10"
+
+  - id: OBS-003
+    nombre: "Metricas de riesgo calculadas y no pintadas"
+    dominio: 13
+    descripcion: "drawdown, sharpe, winrate, expectancy se calculan y ninguna plantilla los muestra."
+    implementacion: parcial
+    validacion: no_probada
+    operacion: no_operativa
+    criticidad: media
+    rutas: ["dashboard/app/main.py", "dashboard/static/css/custom.css:896"]
+    depende_de: [OBS-001]
+    consumido_por: []
+    requisitos: ["El operador ve el riesgo del sistema que esta mirando"]
+    criterios_aceptacion: ["Cada metrica citada en la UI tiene su fuente y su N visibles"]
+    tests: []
+    resultados_tests: "NINGUN TEST"
+    evidencias:
+      - "audit/PHASE1-REPORT.md H8: drawdown/sharpe/winrate/expectancy 6/1/5 apariciones en *.py, 0 en *.html"
+      - "custom.css:896 define .model-provenance sin markup que lo use (medido en auditoria 2026-10-09)"
+    deficiencies: []
+    bloqueos: []
+    siguiente_accion: "Pintar la procedencia del checkpoint y las metricas de riesgo ya calculadas. Es trabajo de plantilla, no de logica de trading."
+    ultima_revision: "2026-10-10"
+
+  - id: OBS-004
+    nombre: "Alertas"
+    dominio: 13
+    descripcion: "Avisos cuando algo va mal."
+    implementacion: ausente
+    validacion: no_probada
+    operacion: no_operativa
+    criticidad: alta
+    rutas: []
+    depende_de: [OBS-001]
+    consumido_por: []
+    requisitos: ["Un bot parado debe producir un aviso sin que el operador mire"]
+    criterios_aceptacion: ["Existe un camino que avisa, con destinatario declarado"]
+    tests: []
+    resultados_tests: "NO EXISTE"
+    evidencias: ["audit/PHASE1-REPORT.md H8: 'Alertas: ninguna, en ningun sitio' (medido 2026-10-09, NO re-verificado hoy)"]
+    deficiencies: ["El panel DEGRADA visiblemente cuando el disco esta critico o el journal no escribe; no hay aviso fuera del panel"]
+    bloqueos: []
+    siguiente_accion: "Decidir el canal de aviso (correo, webhook, fichero). Es una decision del propietario, no tecnica."
+    ultima_revision: "2026-10-10 (No re-verificado)"
+
+  # ─────────────── DOMINIO 14: Infraestructura y fiabilidad ───────────────
+  - id: INF-001
+    nombre: "Dos entornos virtuales aislados"
+    dominio: 14
+    descripcion: "myenv para el bot, dashboard/.venv para el panel."
+    implementacion: existe
+    validacion: parcial
+    operacion: medida
+    criticidad: media
+    rutas: ["myenv/", "dashboard/.venv/", "dashboard/requirements.txt", "requirements.txt"]
+    depende_de: []
+    consumido_por: ["pyproject.toml [project.scripts]"]
+    requisitos: ["El panel se re-ejecuta a si mismo bajo su venv si arranca con el interprete equivocado"]
+    criterios_aceptacion: ["Arranca con el interprete correcto siempre"]
+    tests: []
+    resultados_tests: "No verificado hoy"
+    evidencias:
+      - "pyproject excluye ^(dashboard|myenv)/ de mypy y dashboard de ruff, con la razon escrita"
+      - "AUDITADO 2026-10-09: dashboard/run.py:89-129 se re-ejecuta bajo myenv (0.142.4/2.13.5/3.1.6) mientras dashboard/requirements.txt fija OTRAS (0.111.0/2.7.4/3.1.4). NO RE-VERIFICADO HOY."
+    deficiencies: ["Riesgo conocido de arranque con el interprete equivocado, sin reverificar"]
+    bloqueos: []
+    siguiente_accion: "Verificar que el panel arranca bajo SU venv, no bajo myenv."
+    ultima_revision: "2026-10-10 (No re-verificado)"
+
+  - id: INF-002
+    nombre: "Integracion continua"
+    dominio: 14
+    descripcion: "Ejecucion automatica de la suite en cada commit."
+    implementacion: ausente
+    validacion: no_probada
+    operacion: no_operativa
+    criticidad: alta
+    rutas: []
+    depende_de: [QA-001]
+    consumido_por: []
+    requisitos: ["Ningun commit puede entrar sin la suite en verde"]
+    criterios_aceptacion: ["Existe un pipeline que corre tests + mypy + ruff"]
+    tests: []
+    resultados_tests: "NO EXISTE (.github ausente, medido hoy)"
+    evidencias: ["Test-Path .github -> False (medido hoy)", "pyproject define pytest, mypy y ruff SIN ningun runner que los ejecute automaticamente"]
+    deficiencies: [
+      "Los 3 fallos de ISS-01 llegaron a HEAD porque nada los ejecuta automaticamente",
+      "Un lint final post-sesion quedo sin correr (README memory-graph, 2026-10-07)"
+    ]
+    bloqueos: []
+    siguiente_accion: "Es la infraestructura que convierte todo lo demas en sostenido. Ver R-006."
+    ultima_revision: "2026-10-10"
+
+  # ─────────── DOMINIO 15: Calidad del software y versiones ───────────
+  - id: QA-001
+    nombre: "Suite de tests del bot"
+    dominio: 15
+    descripcion: "1384 tests que no necesitan MT5 (por diseno: una falha de coleccion ES la senal)."
+    implementacion: existe
+    validacion: probada
+    operacion: medida
+    criticidad: critica
+    rutas: ["tests/ (79 ficheros, 23 036 LOC)", "pyproject.toml [tool.pytest.ini_options]"]
+    depende_de: []
+    consumido_por: ["operador", "RELEASE_GATES"]
+    requisitos:
+      - "Ningun test necesita MetaTrader5"
+      - "addopts -q --strict-markers"
+      - "filterwarnings error::DeprecationWarning"
+    criterios_aceptacion: ["exit 0 en la suite completa"]
+    tests: ["(es el conjunto)"]
+    resultados_tests: "1381/1384 PASA · 3 FALLAN (ISS-01) · 10 se saltan (ver abajo) · exit 1 · medido hoy"
+    evidencias:
+      - "Corrida completa: myenv\\Scripts\\python.exe -m pytest tests -> exit 1, 3 FAILED en test_sweep_parallel.py"
+      - "test_sweep_parallel.py AISLADO: 11/11 VERDE"
+    deficiencies:
+      - "10 skips, 5 de los cuales son guardianes de la evidencia: test_reality_check.py:538, test_sweep_universe.py:169 y :376, test_shipped_signal_source.py:100 y :132. El unico test que ejecuta el Reality Check de punta a punta NUNCA CORRE."
+    bloqueos: [ISS-01]
+    siguiente_accion: "ISS-01. Verificar si el resultado en disco (existen barrido-*.json con n_trials) permite convertir esos skips en fallos anunciados."
+    ultima_revision: "2026-10-10"
+
+  - id: QA-002
+    nombre: "Suite de tests del panel"
+    dominio: 15
+    descripcion: "411 tests del panel, en su propio venv."
+    implementacion: existe
+    validacion: probada
+    operacion: medida
+    criticidad: alta
+    rutas: ["dashboard/tests/ (22 ficheros)"]
+    depende_de: [OBS-001]
+    consumido_por: ["operador"]
+    requisitos: ["Nunca necesita MT5 real ni la red"]
+    criterios_aceptacion: ["exit 0"]
+    tests: ["(es el conjunto)"]
+    resultados_tests: "411/411 VERDE · exit 0 · medido hoy con basetemp fuera del repo"
+    evidencias: ["dashboard\\.venv\\Scripts\\python.exe -m pytest dashboard\\tests -> 411 passed"]
+    deficiencies:
+      - "Con TMP=%LOCALAPPDATA%\\Temp falla con PermissionError WinError 5 (artefacto de entorno, medido 2026-10-09, NO re-verificado hoy)"
+    bloqueos: []
+    siguiente_accion: "Documentar que el basetemp debe estar fuera del arbol (ver RELEASE_GATES)."
+    ultima_revision: "2026-10-10"
+
+  - id: QA-003
+    nombre: "Linters y tipos"
+    dominio: 15
+    descripcion: "ruff (select E,F,W,I,UP,B,C4,SIM,RET,ARG) y mypy strict."
+    implementacion: existe
+    validacion: parcial
+    operacion: No evaluado
+    criticidad: media
+    rutas: ["pyproject.toml [tool.ruff]", "pyproject.toml [tool.mypy]"]
+    depende_de: []
+    consumido_por: []
+    requisitos: ["Los ARG por fichero tienen la razon escrita (no es ruido, es contrato de interfaz)"]
+    criterios_aceptacion: ["ruff limpio y mypy strict limpio"]
+    tests: []
+    resultados_tests: "NO EJECUTADOS en esta auditoria"
+    evidencias: ["pyproject.toml explica cada ignore con un parrafo"]
+    deficiencies: ["No hay CI que los ejecute (ver INF-002)"]
+    bloqueos: []
+    siguiente_accion: "Correr ruff y mypy y registrar el resultado en EVIDENCE.yaml."
+    ultima_revision: "2026-10-10"
+
+  - id: QA-004
+    nombre: "Grafo de conocimiento del sistema"
+    dominio: 15
+    descripcion: "117 entidades + 147 relaciones sobre lo que el sistema sabe de si mismo."
+    implementacion: existe
+    validacion: parcial
+    operacion: medida
+    criticidad: media
+    rutas: ["memory-graph.jsonl"]
+    depende_de: []
+    consumido_por: ["README.md"]
+    requisitos: ["Sin script de sincronizacion: se escribe directo"]
+    criterios_aceptacion: ["El grafo y el README no se contradicen"]
+    tests: []
+    resultados_tests: "No verificado"
+    evidencias: ["264 lineas, 117 entidades, 147 relaciones (medido hoy)", "D-018: inventory/ retirado el 2026-10-03 por duplicar el grafo"]
+    deficiencies: ["El README (lineas 401-914) y el grafo tienen contenido solapado y no sincronizado"]
+    bloqueos: []
+    siguiente_accion: "Este mapa (project-control/) es la pieza que falta: no hay inventario estructurado de COMPONENTES."
+    ultima_revision: "2026-10-10"
+
+  # ─────────────── DOMINIO 16: Seguridad y gobernanza ───────────────
+  - id: SEG-001
+    nombre: "El panel no puede colocar ordenes (D-015)"
+    dominio: 16
+    descripcion: "Propiedad de seguridad verificada por test, no por convencion."
+    implementacion: existe
+    validacion: probada
+    operacion: medida
+    criticidad: critica
+    rutas: ["dashboard/app/main.py", "tests/test_no_order_path.py"]
+    depende_de: []
+    consumido_por: ["operador"]
+    requisitos: ["Ni open_position, ni close_position, ni modify_position, ni send_order en el panel"]
+    criterios_aceptacion: ["El test nombra dashboard/app/main.py y FALLA si el fichero falta"]
+    tests: ["tests/test_no_order_path.py::test_the_panel_has_no_order_route"]
+    resultados_tests: "verde"
+    evidencias: ["84 rutas, 0 de orden (medido hoy)", "README.md:130-138"]
+    deficiencias: []
+    bloqueos: []
+    siguiente_accion: "Ninguna."
+    ultima_revision: "2026-10-10"
+
+  - id: SEG-002
+    nombre: "Separacion de procesos (D-017)"
+    dominio: 16
+    descripcion: "El panel no importa el bot. Dos venvs, un directorio comun."
+    implementacion: existe
+    validacion: probada
+    operacion: medida
+    criticidad: alta
+    rutas: ["dashboard/app/", "app/", "data/control/README.md"]
+    depende_de: []
+    consumido_por: []
+    requisitos: ["control_channel.py, journal_reader.py e instrumentos.py son ESPEJOS, no imports"]
+    criterios_aceptacion: ["0 aristas de import de dashboard/app/* hacia app.*"]
+    tests: ["dashboard/tests", "tests/test_colision_app_d017.py"]
+    resultados_tests: "verde"
+    evidencias:
+      - "0 aristas verificadas hoy (medido en la auditoria del 2026-10-09; el panel tiene su propio app/ en sys.path[0])"
+      - "README.md:141-146 explica el coste pagado a proposito"
+    deficiencias:
+      - "Los espejos se sostienen con tests, no con el type checker. Un refactor los puede desincronizar en silencio."
+    bloqueos: []
+    siguiente_accion: "Ninguna. El coste esta declarado y las vallas existen."
+    ultima_revision: "2026-10-10"
+
+  - id: SEG-003
+    nombre: "El panel puede desactivar los 11 validadores de riesgo"
+    dominio: 16
+    descripcion: "POST /api/features escribe features.json sin autenticacion ni CSRF."
+    implementacion: existe
+    validacion: no_probada
+    operacion: medida
+    criticidad: CRITICA
+    rutas: ["dashboard/app/main.py:2118", "dashboard/app/features.py", "app/features.py", "risk/engine.py:158"]
+    depende_de: [RISK-001, CTL-002]
+    consumido_por: ["risk/engine.py"]
+    requisitos:
+      - "Quitar un freno de riesgo es una decision de operador, no un boton de un formulario"
+    criterios_aceptacion:
+      - "Desactivar un validador exige confirmacion explicita y queda journalizado"
+    tests: []
+    resultados_tests: "NINGUN TEST de autorizacion en esta ruta"
+    evidencias:
+      - "dashboard/app/main.py:2118 @app.post('/api/features') -> control().write_features(features, reason=reason)"
+      - "El campo 'reason' es opcional y solo se pide para features, no para limites"
+      - "audit/PHASE1-REPORT.md H4: 'el panel no puede colocar ordenes pero si puede apagar los validadores que las autorizan'"
+    deficiencies:
+      - "El panel esta en 127.0.0.1 sin autenticacion: el vector es local, no remoto. Aun asi, un unico proceso en la maquina puede desarmar los 11 validadores."
+    bloqueos: []
+    siguiente_accion: "R-002. Es el hallazgo de seguridad mas serio que queda abierto."
+    ultima_revision: "2026-10-10"
+
+  - id: SEG-004
+    nombre: "Credenciales fuera del repo"
+    dominio: 16
+    descripcion: "Las claves MT5 viven en .env, que esta en .gitignore."
+    implementacion: existe
+    validacion: probada
+    operacion: medida
+    criticidad: alta
+    rutas: [".gitignore:20", "dashboard/.env.example"]
+    depende_de: []
+    consumido_por: []
+    requisitos: [".env nunca se versiona; .env.example tiene los campos vacios"]
+    criterios_aceptacion: ["git ls-files no lista ningun .env"]
+    tests: []
+    resultados_tests: "verificado por inspeccion (medido hoy)"
+    evidencias: ["git check-ignore -v dashboard/.env -> .gitignore:20", "git ls-files | Select-String 'env$' -> vacio", ".env.example: MT5_LOGIN=, MT5_PASSWORD=, MT5_SERVER=, MT5_PATH= (vacias)"]
+    deficiencias: []
+    bloqueos: []
+    siguiente_accion: "Ninguna."
+    ultima_revision: "2026-10-10"
+
+  # ───────── DOMINIO 17: Despliegue, recuperacion y operacion ─────────
+  - id: OPS-001
+    nombre: "Lanzador del bot desde el panel"
+    dominio: 17
+    descripcion: "El panel arranca el bot con un comando fijo que ninguna peticion HTTP alcanza."
+    implementacion: existe
+    validacion: probada
+    operacion: No evaluado
+    criticidad: media
+    rutas: ["dashboard/app/main.py (/api/bot/launch)", "dashboard/dashboard_paths.py"]
+    depende_de: [CTL-002]
+    consumido_por: ["operador"]
+    requisitos: ["Comprueba config y myenv ANTES de crear el proceso"]
+    criterios_aceptacion: ["El fallo es una frase en pantalla, no un pid muerto"]
+    tests: ["dashboard/tests"]
+    resultados_tests: "verde"
+    evidencias: ["README.md:85-88"]
+    deficiencias: []
+    bloqueos: []
+    siguiente_accion: "Ninguna."
+    ultima_revision: "2026-10-10"
+
+  - id: OPS-002
+    nombre: "Recuperacion ante fallo / apagado ordenado"
+    dominio: 17
+    descripcion: "Reconciliacion, lock de instancia y handles de excepcion."
+    implementacion: existe
+    validacion: parcial
+    operacion: No evaluado
+    criticidad: alta
+    rutas: ["runtime/reconcile.py", "runtime/instance_lock.py", "runtime/loop.py"]
+    depende_de: [CTL-001]
+    consumido_por: []
+    requisitos: ["Un crash no deja un lock que impida reiniciar", "Un restart no puede quedar colgado"]
+    criterios_aceptacion: ["El bot se puede matar y relanzar sin intervencion manual"]
+    tests: ["tests/test_reconcile.py", "tests/test_instance_lock.py", "tests/test_emergency_stop.py"]
+    resultados_tests: "verde"
+    evidencias: ["app/main.py:699 reconcilia antes de actuar", "InstanceLock con LockError propio"]
+    deficiencias: ["NO VERIFICADO con el bot real corriendo: no se ha hecho un kill -9 y un relanzamiento medido"]
+    bloqueos: []
+    siguiente_accion: "Prueba de supervivencia: matar el bot a mitad de una operacion y comprobar que el relanzamiento reconcilia."
+    ultima_revision: "2026-10-10"
+
+  - id: OPS-003
+    nombre: "Backup de artefactos y datos"
+    dominio: 17
+    descripcion: "Checkpoints, datasets y resultados de barrido."
+    implementacion: parcial
+    validacion: no_probada
+    operacion: No evaluado
+    criticidad: alta
+    rutas: ["checkpoints/", "checkpoints_training/", "data/research/", "data/raw/"]
+    depende_de: []
+    consumido_por: []
+    requisitos: ["Se puede reconstruir que checkpoint produjo que numero"]
+    criterios_aceptacion: ["Cada resultado declara su procedencia completa"]
+    tests: ["tests/test_result_provenance.py (7)"]
+    resultados_tests: "verde"
+    evidencias:
+      - "walkforward-H1-modelo-medido-20261010.json: provenance con git_commit=44f8591, model_path, model_epoch, data_sha256_16 por simbolo, n_configurations, selection_note"
+      - "checkpoints_training/ esta versionado; los demas estan en .gitignore con la razon escrita"
+    deficiencias:
+      - "NO HAY COPIA DE SEGURIDAD: data/raw/ y data/research/ estan en .gitignore y no tienen backup declarado"
+      - "bug no-training-history: cada corrida sobrescribe el checkpoint anterior y sus metadatos (abierto)"
+      - "Los ficheros walkforward_results*.json de la raiz (363 MB) siguen sin procedencia"
+    bloqueos: []
+    siguiente_accion: "R-005: decidir si data/ necesita backup. Es una decision de coste, no tecnica."
+    ultima_revision: "2026-10-10"
+
+  # ───────── DOMINIO 18: Viabilidad economica y mejora continua ─────────
+  - id: ECO-001
+    nombre: "Existencia de una ventaja economica"
+    dominio: 18
+    descripcion: "¿Hay alguna regla o modelo con habilidad despues de corregir por seleccion multiple?"
+    implementacion: existe
+    validacion: probada
+    operacion: "MEDIDA: NEGATIVA"
+    criticidad: CRITICA
+    rutas: ["data/research/barrido-*.json", "data/research/registro-experimentos.json", "data/research/archive/"]
+    depende_de: [RES-003, VAL-001]
+    consumido_por: ["config/gts.yaml", "app/main.py"]
+    requisitos:
+      - "Un p-valor de White < 0.05 sobre el universo entero"
+      - "Una confirmacion sobre tramo limpio que NO sea refutada"
+    criterios_aceptacion: ["p < 0.05 Y confirmacion no refutada"]
+    tests: []
+    resultados_tests: "n/a - es una conclusion, no un componente"
+    evidencias:
+      - "MEDIDO NEGATIVO: barrido-AUDUSD-H1-entrenar-1 p=0.6988; barrido-AUDUSD-H1-entrenar-2 p=0.9980; barrido-AUDUSD-H4-entrenar-1 p=0.2715"
+      - "MEDIDO NEGATIVO: confirmacion-AUDUSD-H4-examinar-1 MA_Crossover refutada, t=-0.488, beneficio neto -0.0147, 565 operaciones"
+      - "MEDIDO NEGATIVO: Sharpe OOS del modelo -0.064 +- 1.363 sobre 28 folds"
+      - "REGISTRO: cero pares confirmados en data/research/registro-experimentos.json"
+      - "Experimento no-signal-in-direction: status confirmed (la etiqueta NO es predecible)"
+    reevaluacion: |
+      Este componente tiene implementacion y validacion, y su resultado medido es
+      NEGATIVO. No es un defecto: es el sistema funcionando. Un p de 0,998 con
+      correccion de White es exactamente la respuesta que el sistema se proponia
+      dar, y esta escrita en disco con su procedencia.
+    deficiencies:
+      - "no-transaction-cost-model: RESUELTO en el codigo (core/costs.py con dos modos); el README linea 906 lo mantiene abierto y esta DESACTUALIZADO"
+    bloqueos: [ISS-02]
+    siguiente_accion: "Ninguna hasta resolver ISS-02. Sin tramo fuera de muestra no se puede cambiar esta respuesta."
+    ultima_revision: "2026-10-10"

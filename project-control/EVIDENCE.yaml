@@ -1,0 +1,353 @@
+# GTS — Indice de evidencia
+# Revision: ffbe39f · Fecha: 2026-10-11
+#
+# QUE ES ESTE FICHERO: el registro de lo que se ha MEDIDO, con su comando y su
+# fecha. Si algo aqui no tiene comando, no se ha medido: es una afirmacion.
+#
+# QUE NO ES: un informe. Los informes se archivan; esto se re-genera.
+
+meta:
+  fecha: "2026-10-11"
+  commit: "ffbe39f365bb8ec06fc54ab269b860258ad57f27"
+  maquina: Windows · Python 3.12 (myenv) · Python 3.12 (dashboard/.venv)
+  regla_basetemp: "SIEMPRE fuera del arbol del repo. Dentro, test_research_cannot_trade da falso positivo."
+  commits_desde_la_auditoria_anterior: ["44f8591", "e801d4e", "ffbe39f"]
+  auditoria_anterior: "audit/ (borrada del arbol, recuperable en HEAD) · 2026-10-09 · base 32b6f8e"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SUITES DE TESTS — el denominador de todo lo demas
+# ═══════════════════════════════════════════════════════════════════════════
+suites:
+
+  - suite: bot
+    comando: 'myenv\Scripts\python.exe -m pytest tests -p no:cacheprovider -q --no-header --basetemp FUERA_DEL_ARBOL'
+    fecha: "2026-10-11"
+    collected: 1463
+    passed: 1384
+    failed: 0
+    skipped: 79
+    exit_code: 0
+    duracion: "9-10 min"
+    conclusion: >
+      VERDE, re-corrida tras el fix del reloj del broker (ISS-035): el
+      detector de barras en formacion comparaba timestamps en hora del
+      broker (EEST = UTC+3) contra el reloj local (UTC), clasificando
+      toda barra reciente como "en formacion". Fix: `_reloj_del_broker()`
+      en el adaptador usa `terminal.server_time()`. 3 tests nuevos
+      (test_reloj_del_broker.py) con un doble cuyo reloj va 3h adelante.
+      Cero fallos; los 79 saltos declaran su motivo (artefactos que la
+      limpieza retiro).
+    saltos:
+      total: 79
+      nota: >
+        Cada skip declara su motivo en el propio test (mecanismo de ffbe39f).
+        Los clusters grandes son los artefactos que la limpieza de la nueva
+        etapa retiro: bundle gts/ (test_colab_bundle 28 + test_kaggle_layout 8)
+        y barridos/checkpoints ausentes (test_sweep_universe, test_sweep_parallel,
+        test_scaler_canonical 10, test_research_window 4).
+    orden_adverso:
+      comando: 'myenv\Scripts\python.exe -m pytest tests\test_kaggle_layout.py tests\test_sweep_parallel.py --basetemp FUERA_DEL_ARBOL'
+      fecha: "2026-10-11"
+      resultado: "exit 0 (kaggle_layout: 3 pasan, 8 saltan; sweep_parallel: 7 pasan, 4 saltan)"
+      conclusion: "El orden que reprodujo los 3 fallos historicos (ISS-001) sale limpio: la contaminacion del arnes esta muerta."
+    incidente_resuelto:
+      titulo: "La suite se congelaba en coleccion: cache de numba envenenada"
+      sintoma: >
+        Tres corridas >60 min sin pasar del segundo modulo de test; un nucleo al
+        100%; ningun basetemp creado; ningun resultado emitido.
+      causa: >
+        research/__pycache__/labeling._apply_triple_barrier_numba-93.py312.*.nbc
+        y .nbi, escritos el 2026-10-10 20:50, congelaban la importacion de
+        research.labeling. Demostracion: el mismo labeling.py copiado con cache
+        virgen importa en 1.02 s; el original, bloqueo indefinido. El codigo esta
+        sano. Ver ISS-030.
+      fix: "Los 3 ficheros apartados a %TEMP%\\gts-numba-cache-backup (nada borrado). Cache regenerada verificada sana: un segundo proceso importa contra ella en 1.27 s."
+      leccion: "Una suite que no avanza y quema un nucleo no es una suite lenta: es un import congelado. Mirar basetemp y el contador antes de esperar."
+
+  - suite: panel
+    comando: 'dashboard\.venv\Scripts\python.exe -m pytest dashboard\tests -p no:cacheprovider -q --no-header --basetemp FUERA_DEL_ARBOL'
+    fecha: "2026-10-11"
+    collected: 447
+    passed: 447
+    failed: 0
+    skipped: 0
+    exit_code: 0
+    conclusion: >
+      VERDE tras la reestructuracion del panel, R-012 (metricas con fuente y
+      N + procedencia), R-013 (alertas Telegram, 17 tests con canal simulado
+      y aviso real confirmado por el dueno) e ISS-034 (la puerta R:R fuera
+      del panel: esquema sin ella, POST que la descarta con respuesta
+      explicita). La suite del BOT se re-corrio tras ISS-034 (config.py es
+      del bot): 1463/1384/79, exit 0.
+
+  - suite: lint_y_tipos
+    comando: "myenv\\Scripts\\python.exe -m ruff check . ; myenv\\Scripts\\python.exe -m mypy"
+    estado: NO_EJECUTADO
+    fecha: "2026-10-10"
+    conclusion: "Definidos en pyproject.toml, sin CI que los ejecute (ISS-012). No medidos hoy."
+
+  - suite: ci
+    estado: INEXISTENTE
+    evidencia: "Test-Path .github -> False"
+    ver: ISS-012
+
+# ═══════════════════════════════════════════════════════════════════════════
+# EVIDENCIA DE INVESTIGACION — los numeros que el sistema produce
+# ═══════════════════════════════════════════════════════════════════════════
+investigacion:
+
+  limpieza_de_nueva_etapa:
+    fecha: "2026-10-11 (verificado contra el arbol)"
+    estado: >
+      data/research/ esta VACIO. La limpieza de la nueva etapa (seccion 8 de la
+      especificacion maestra) retiro barridos, confirmaciones, registro de
+      experimentos y archivos de walk-forward que esta seccion documentaba en
+      la revision anterior. Ninguna cifra de investigacion vive hoy en disco.
+    arranque: >
+      Verificado: el sistema no exige esa evidencia para arrancar. Los tests
+      del bot que la usaban saltan con motivo declarado (79 saltos, ver
+      suites[bot]); el panel tiene UN test fuera de esa convencion que falla
+      duro (ISS-031).
+    registro_historico_de_lo_retirado:
+      barridos: "3 con Reality Check, todos NO significativos: AUDUSD H1 ATR_Breakout p=0.699; AUDUSD H1 EMA_Trend_Pullback p=0.998; AUDUSD H4 MA_Crossover p=0.272"
+      confirmaciones: "1 llego a confirmacion y fue REFUTADA: AUDUSD H4 MA_Crossover, 565 operaciones, beneficio neto negativo, t=-0.488. El gate funciona."
+      registro: "4 pares, 6 resultados, 0 confirmados — por eso el bot se niega a arrancar salvo --selection"
+      lectura: >
+        Lo que sigue VIVO no son los ficheros sino las consecuencias: la regla
+        por defecto (EMA_Trend_Pullback) opero siempre sin evidencia (R-010) y
+        el metodo del walk-forward sigue sin tramo fuera de muestra (ISS-002).
+        Las cifras concretas ya no son reproducibles desde el arbol; si se
+        necesitan, hay que re-emitirlas con el procedimiento nuevo.
+
+  walkforward_modelo:
+    estado: >
+      RETIRADO DEL ARBOL por la limpieza de la nueva etapa (verificado
+      2026-10-11: los ficheros ya no existen). Lo que queda abajo es el registro
+      historico de la medicion del 2026-10-10; NO es evidencia reproducible
+      desde el arbol actual. ISS-002 (el metodo sin tramo fuera de muestra)
+      sigue ABIERTO: es un defecto del codigo, no del dato.
+    ficheros:
+      - "data/research/archive/walkforward-H1-modelo-medido-20261010.json (RETIRADO)"
+      - "data/research/archive/walkforward-H1-modelo-conservador-20261010.json (RETIRADO)"
+    fecha: "2026-10-10"
+    git_commit: "44f8591"
+    model_path: "checkpoints_training\\best_model.pt"
+    model_epoch: 0
+    simbolos: [EURUSD, GBPUSD, USDJPY, XAUUSD]
+    broker_declarado: exness
+    broker_presente_en_disco: false
+    ver: ISS-004
+    parametros: {lookback_bars: 100, purge_pct: 0.1, embargo_pct: 0.02, wf_train: 10000, wf_test: 2000, wf_step: 1000, train_split: 0.8, n_configurations: 1}
+    resultados:
+      - modo: medido
+        folds_totales: 148
+        folds_in_sample: 112
+        folds_out_of_sample: 28
+        operaciones_totales: 2756
+        sharpe_oos: -0.0639
+        sharpe_oos_std: 1.3634
+        sharpe_is: -0.4210
+        retorno_anual_oos: 0.0183
+        cost_drag_medio: 0.00647
+        headline: out_of_sample
+      - modo: conservador
+        folds_totales: 148
+        folds_in_sample: 112
+        folds_out_of_sample: 28
+        operaciones_totales: 2756
+        sharpe_oos: -0.0670
+        sharpe_oos_std: 1.3617
+        sharpe_is: -0.4272
+        retorno_anual_oos: 0.0179
+        cost_drag_medio: 0.00663
+    decay_check:
+      spearman_rho: 0.2057
+      p_value: 0.3032
+      n_folds: 27
+      interpretation: "NO SIGNIFICANT DECAY (model stable)"
+    lectura: >
+      El Sharpe fuera de muestra es ~0 con desviacion 1.36: la dispersion es 21
+      veces el valor. Con 28 folds, esta cifra NO distingue 'nada' de 'algo'.
+      El propio fichero confiesa que los folds OOS no lo son para este checkpoint.
+    ver: [VAL-002, ML-002, ISS-002]
+    campos_adicionales_presentes: [mc_metrics, stress_results, regime_metrics, label_quality]
+    nota_montecarlo: >
+      mc_metrics y stress_results ESTAN en el fichero. El README (linea 396) afirma
+      que nunca se han ejecutado. PENDIENTE de verificar si tienen contenido real
+      o son ceros por defecto (ver VAL-004).
+
+  piloto_de_vuelo:
+    variables:
+      purga: "barrier_calibration.py + verify_barrier_vol_k.py"
+      barrido_purgado: "purged_sweep.py + verify_purged"
+      regresion_backtest: "scripts/verify_backtest_regression.py"
+      consola_negativa: "research/control_negativo.py"
+      balance_de_etiquetas: "research/label_balance.py"
+      balance_de_predictibilidad: "research/label_predictability.py"
+      longitud_minima: "research/minimum_backtest_length.py"
+      sobreajuste: "overfit_report.py"
+      persistencia: "holdout_eval.py"
+      ablation: "ablation.py"
+      regimen: "regime.py"
+      skill: "skill_check.py"
+    conclusion: "Dominio 2 y 8 tienen una cobertura de verificacion inusualmente densa. Es la parte mas fuerte del sistema."
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ESTRUCTURA DEL CODIGO
+# ═══════════════════════════════════════════════════════════════════════════
+estructura:
+  loc_por_paquete:
+    research: 14216
+    dashboard/app: 7640
+    core: 4418
+    app: 4433
+    runtime: 2319
+    simulation: 1395
+    risk: 1490
+    indicators: 925
+    live: 923
+    mt5: 842
+    strategies: 759
+    training: 707
+    storage: 377
+    decisions: 116
+    tests: 23036
+  fecha: "2026-10-10"
+  asimetria_principal: "investigacion (14 216) = 6x el bucle que opera (2 319)"
+  ficheros_python_raiz: 8
+  modulos_research: 43
+  reglas_estrategia: 11
+  validadores_riesgo: 11
+  rutas_panel: 84
+  rutas_de_orden_en_panel: 0
+  bundle_gts: "ELIMINADO — gts/ no existe en el arbol; sus tests saltan con motivo (verificado 2026-10-11)"
+  ver: [ML-003, ISS-001, ISS-027]
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SEGURIDAD — comprobaciones hechas con herramientas, no por lectura
+# ═══════════════════════════════════════════════════════════════════════════
+seguridad:
+  - comprobacion: "El panel no expone ninguna ruta de orden"
+    metodo: 'Select-String @app.(post|get|put|delete) en dashboard/app/main.py'
+    resultado: "84 rutas; 0 de orden. Las unicas con 'position' son GET /api/positions y POST /api/positions/flatten."
+    veredicto: CUMPLE
+  - comprobacion: "El panel no importa el bot"
+    metodo: "Analizador de imports (audit/architect, 2026-10-09, re-verificado hoy)"
+    resultado: "0 aristas de dashboard/app/* hacia app/*. El panel tiene su propio app/ en sys.path[0]."
+    veredicto: CUMPLE
+  - comprobacion: "El panel enlaza a localhost"
+    metodo: "Lectura de dashboard/app/config.py"
+    resultado: "gts_host default '127.0.0.1' (GTS_HOST)"
+    veredicto: CUMPLE
+  - comprobacion: "Ningun .env versionado"
+    metodo: "git ls-files | Select-String 'env$' ; git check-ignore -v dashboard/.env"
+    resultado: "0 .env en git. dashboard/.env -> .gitignore:20"
+    veredicto: CUMPLE
+  - comprobacion: "Las credenciales MT5 de ejemplo estan vacias"
+    metodo: "Lectura de dashboard/.env.example"
+    resultado: "MT5_LOGIN=, MT5_PASSWORD=, MT5_SERVER=, MT5_PATH= (todas vacias)"
+    veredicto: CUMPLE
+  - comprobacion: "live.enabled apagado y allow_funded apagado (dos cerrojos)"
+    metodo: "Lectura de config/gts.yaml:362-372"
+    resultado: "enabled: false, allow_funded: false"
+    veredicto: CUMPLE
+  - comprobacion: "Solo un modulo puede enviar ordenes"
+    metodo: "Select-String order_send en live/ y simulation/"
+    resultado: "order_send en live/execution.py (8), live/terminal.py (3), live/__init__.py (1), simulation/portfolio.py (1 comentario)"
+    veredicto: "CUMPLE CON MATIZ"
+    matiz: >
+      simulation/broker_book.py:66 importa live.execution a nivel de modulo. La
+      garantia descansa en una lista de prohibidos del test, no en la estructura.
+    ver: ISS-013
+  - comprobacion: "El panel puede desactivar los validadores de riesgo"
+    metodo: >
+      Doble comprobacion 2026-10-11: el loader descarta risk+limites del
+      traspaso del panel (app/config.py, desde el 2026-10-10), y el panel ya
+      no ofrece la seccion ni acepta POSTs con ella: los descarta con
+      respuesta explicita o los rechaza con 422 (tests
+      dashboard/tests/test_features_sin_riesgo.py, 4/4).
+    resultado: "La cadena panel->features.json->limites esta cortada en AMBOS extremos; el riesgo vive solo en config/gts.yaml versionado."
+    veredicto: CUMPLE
+    ver: ISS-003
+  - comprobacion: "El panel no escribe el heartbeat del bot"
+    metodo: "Lectura de runtime/control.py / README D-017"
+    resultado: "PanelControl no tiene publish"
+    veredicto: CUMPLE
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ESTADO OPERATIVO — lo que se sabe del sistema en ejecucion
+# ═══════════════════════════════════════════════════════════════════════════
+operacion:
+  bot_en_ejecucion: false
+  evidencia: "data/control/state.json ya no existe: la limpieza de la nueva etapa lo retiro. Solo queda el README."
+  journal_bytes: 0
+  journal_lectura: "data/journal/decisions.jsonl existe, VACIO (creado 2026-10-11 02:23). La cadena de hash sigue sin verificarse contra una sesion real."
+  ver: ISS-011
+  ultima_carga_util_con_registro: "La anterior a la limpieza; los registros operativos nuevos empiezan vacios por diseño."
+  mt5_conectado_durante_esta_sesion: true
+  verificacion_historicos: >
+    scripts/shadow_mt5.py contra el terminal real, 2026-10-11: 26/26
+    comprobaciones OK, exit 0 (con el mercado cerrado). Cuenta 10012953169
+    @ MetaQuotes-Demo (demo=True). 600 barras H1 de EURUSD validadas.
+    Con el mercado ABIERTO: 25/26 OK (fallo ATR disponible por ISS-035,
+    corregido).
+  polling_en_vivo: >
+    scripts/polling_mt5.py --temporalidad M5 --espera 420, contra el
+    terminal real con el mercado ABIERTO, 2026-10-11: 13/13 OK, exit 0.
+    Una barra M5 nueva cerro y llego al TradingLoop de produccion por
+    run_once, exactamente una vez (contador barras +1, decisiones +1,
+    journal en disco +1). 30 lecturas mas sin cierre nuevo: nada se
+    reentrego. ProcessBar ejecutado con reconciliacion conectada. Journal
+    con 1 entrada, cadena valida. SHADOW nego el envio por las tres vias
+    y la cuenta quedo sin posiciones (0). Tiempo de espera real: 151 s.
+    ESTO CIERRA EL PENDIENTE 2 DE LA SECCION 12.
+  panel_arrancado_durante_esta_sesion: false
+  razon_panel: "Suite 447/447 en verde; arrancarlo no aporta nada nuevo con MT5 ya verificado."
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ESTADO DE GIT
+# ═══════════════════════════════════════════════════════════════════════════
+git:
+  rama: master
+  head: "sin commitear (ISS-035)"
+  fecha_head: "2026-10-11 (en curso)"
+  ficheros_sin_comitear: "4 lineas: 2 D architecture/gts-architecture.{html,json}, 2 sin rastrear project-control/*.md"
+  eliminaciones_preparadas: 0
+  nota: >
+    Las 220 eliminaciones de audit/ de la revision anterior se resolvieron en
+    commits, y brokers/exness.yaml esta restaurado y versionado (verificado
+    2026-10-11 con git ls-files). El aviso de no-ejecutar-checkout queda obsoleto.
+  .gitignore_cubre: ["/data/* (con excepciones)", "/gts/", "descarga/", "dashboard/.env", "colab/gts_colab_bundle.zip", "/kaggle/data/"]
+
+# ═══════════════════════════════════════════════════════════════════════════
+# LO QUE NO SE HA MEDIDO — con el motivo
+# ═══════════════════════════════════════════════════════════════════════════
+no_medido:
+  - que: "Polling en vivo: una barra H1 nueva cerrada entregada a su hora por MT5"
+    motivo: "Mercado cerrado el dia de la verificacion de conexion; sin barra nueva no hay nada que contar"
+    que_habria_que_hacer: >
+      Con el mercado abierto: myenv\Scripts\python.exe -m scripts.polling_mt5
+      --temporalidad H1 --espera 4200. exit 0 = verificado; exit 5/6 = NO
+      VERIFICADO (limite agotado o mercado cerrado: no es defecto de codigo);
+      exit 2/3/4 = bloqueo concreto. Despues, scripts.shadow_mt5.py en la
+      misma sesion.
+  - que: "Entrenamiento, barrido o walk-forward"
+    motivo: "Prohibido en Fase 1. Ninguna cifra de este informe es de una corrida hecha hoy."
+    que_habria_que_hacer: "R-003 y R-010, con autorizacion."
+  - que: "Contenido real de mc_metrics y stress_results"
+    motivo: "No inspeccionados en detalle"
+    que_habria_que_hacer: "Leer los bloques de los ficheros archive/*.json y verificar que no son ceros por defecto (VAL-004)."
+  - que: "Si portfolio_optimizer se ejecuta y aplica sus topes"
+    motivo: "H6 de la auditoria anterior quedo obsoleto al aparecer signal_value; requiere lectura mas profunda"
+    que_habria_que_hacer: "Instrumentar la rama y ver que hace (ISS-007, R-009)."
+  - que: "Que interprete usa realmente dashboard/run.py"
+    motivo: "Medido el 2026-10-09, no re-verificado hoy"
+    que_habria_que_hacer: "Arrancar el panel y leer el interprete del proceso (ISS-015)."
+  - que: "Si existe copia de seguridad de data/"
+    motivo: "El arbol no lo declara y no hay acceso a la infraestructura"
+    que_habria_que_hacer: "Preguntar al propietario (ISS-016)."
+  - que: "Rendimiento del arbol completo"
+    motivo: "No medido en navegador real ni con MT5"
+  - que: "Las cifras de la auditoria del 2026-10-09 no re-verificadas"
+    motivo: "Marcadas como 'No re-verificado' donde aplican"
+    ver: [ISS-015, INF-001, OBS-004]
