@@ -1,0 +1,443 @@
+diff --git a/research/experimento.py b/research/experimento.py
+index f657c01..e3e4e9c 100644
+--- a/research/experimento.py
++++ b/research/experimento.py
+@@ -364,6 +364,17 @@ def _requerir_par_prometido(reg: dict[str, Any], args: argparse.Namespace,
+ 
+ 
+ def _cmd_barrer(args: argparse.Namespace) -> int:
++    """El subcomando de consola: la ejecucion de siempre, sin enganches.
++
++    La logica vive en :func:`ejecutar_barrido` para que el worker la llame
++    con progreso y cancelacion reales sin que la linea de comandos cambie
++    un byte de su salida.
++    """
++    return ejecutar_barrido(args)
++
++
++def ejecutar_barrido(args: argparse.Namespace, *,
++                      progreso: Any = None, cancelado: Any = None) -> int:
+     """El barrido sobre un tramo de seleccion: puerta, pin, gasto, busqueda.
+ 
+     El orden no es decorativo. Todo lo barato primero (validar, recortar,
+@@ -371,8 +382,17 @@ def _cmd_barrer(args: argparse.Namespace) -> int:
+     los ensayos, GASTAR el tramo y guardar. Despues la busqueda, que es lo
+     caro. Si el proceso muere a mitad del barrido, el registro ya dice la
+     verdad; si muriera antes, el tramo sigue limpio de verdad.
++
++    `progreso` (evento, carga) y `cancelado` () -> bool son los enganches
++    de la fase D que usa el worker de trabajos; la linea de comandos no los
++    usa y su salida no cambia un byte. Los puntos de cancelacion son: antes
++    de declarar ensayos y gastar el tramo (el tramo queda LIMPIO si se
++    cancela ahi), y entre configuraciones de la busqueda (el tramo ya esta
++    gastado; lo medido se escribe en el JSON MARCADO incompleto, nunca como
++    si estuviera completo).
+     """
+     from research.sweep import (
++        CancelacionSolicitada,
+         _grids,
+         barrido_paralelo,
+         reality_check_over,
+@@ -382,11 +402,35 @@ def _cmd_barrer(args: argparse.Namespace) -> int:
+     from research.window import split_csv, verify_window
+     from strategies.registry import build_strategy
+ 
++    def _decir(tipo_evento: str, fase: str | None = None,
++               mensaje: str | None = None, hecho: int | None = None,
++               total: int | None = None, detalle: dict[str, Any] | None = None
++               ) -> None:
++        """Un evento de progreso, si hay a quien contarselo. La consola no
++        escucha: sus prints siguen siendo los de siempre."""
++        if progreso is not None:
++            progreso(tipo_evento, {"fase": fase, "mensaje": mensaje,
++                                   "hecho": hecho, "total": total,
++                                   "detalle": detalle})
++
++    def _cancelar_si_piden(mensaje: str) -> None:
++        if cancelado is not None and cancelado():
++            raise CancelacionSolicitada(mensaje)
++
+     reg = registro.cargar()
+     p, tramo = _requerir_par_prometido(reg, args, tipo_esperado="seleccion")
++    # La trazabilidad del criterio viaja DENTRO del resultado, no al lado: un
++    # JSON de barrido sin el identificador del criterio que lo autorizo es un
++    # numero del que no se puede decir quien lo pidio ni con que metodologia.
++    _criterio = p.get("criterio") or {}
+     # El perfil del broker DECLARADO cuyos costos cobra esta evaluacion. Lo
+     # declara la linea de comandos (-brokers/<broker>.yaml); no hay adivinanza.
+     profile = load_broker(args.broker)
++    _decir("puerta", fase="puerta", mensaje=(
++        f"tramo '{args.tramo}' reclamaido: {tramo['desde']} -> {tramo['hasta']}"
++    ), detalle={"simbolo": args.symbol, "temporalidad": args.timeframe,
++                "tipo": tramo["tipo"], "broker": profile.name})
++    _cancelar_si_piden("cancelado en la puerta, el tramo queda limpio")
+ 
+     if args.limit_bars and args.workers < 2:
+         raise registro.RegistroError(
+@@ -395,13 +439,17 @@ def _cmd_barrer(args: argparse.Namespace) -> int:
+             "Un smoke que mide mas de lo que dice es peor que no hacer smoke; "
+             "usa --workers 2, o quita --limit-bars y mide de verdad.")
+ 
+-    grids = _grids()
++    grids = getattr(args, "grids", None) or _grids()
+     if args.solo_regla:
+         desconocidas = [r for r in args.solo_regla if r not in grids]
+         if desconocidas:
+             raise registro.RegistroError(
+                 f"reglas desconocidas {desconocidas}; las que hay: {sorted(grids)}")
+         grids = {r: grids[r] for r in args.solo_regla}
++    if not grids:
++        raise registro.RegistroError(
++            "el criterio pre-inscrito no declara ninguna configuracion que "
++            "medir: hay una promesa sin contenido, que no es una promesa")
+     # Validar barato antes de gastar: un typo en una regla no puede quemar un tramo.
+     for rule_id, plans in grids.items():
+         for params in plans:
+@@ -432,6 +480,12 @@ def _cmd_barrer(args: argparse.Namespace) -> int:
+         print(f"  CPCV: {cv_config.n_splits} splits, {cv_config.n_test_splits} test groups, "
+               f"embargo={cv_config.embargo_pct:.1%}")
+         
++        # Punto de cancelacion antes del gasto, igual que el camino 50/50.
++        # El barrido CPCV aun no tiene cancelacion fina dentro de purged_barrer:
++        # parar aqui deja el tramo limpio; parar despues deja el JSON sin
++        # escribir y el tramo gastado (recuperable solo re-declarando).
++        _cancelar_si_piden(
++            "cancelado antes de declarar ensayos (CPCV): el tramo queda limpio")
+         # Gasto y ensayos ANTES de la búsqueda
+         registro.acumular_ensayos(reg, args.symbol, args.timeframe, n_grid,
+                                   f"barrido CPCV de {n_grid} configuraciones sobre '{args.tramo}'")
+@@ -449,6 +503,11 @@ def _cmd_barrer(args: argparse.Namespace) -> int:
+         out_data.update({
+             "symbol": args.symbol, "timeframe": args.timeframe,
+             "broker": profile.name,
++            "criterio": {"id": _criterio.get("criterio_id", ""),
++                         "hash": _criterio.get("hash", ""),
++                         "metodologia": _criterio.get("metodologia", {}),
++                         "estado": _criterio.get("metodologia_estado", ""),
++                         "uso": _criterio.get("metodologia_uso", "")},
+             "tramo": {"nombre": tramo["nombre"], "desde": tramo["desde"],
+                       "hasta": tramo["hasta"], "tipo": tramo["tipo"]},
+             "pin": {"archivo": pin.name, "sha256": digest, "velas": len(recorte.bars)},
+@@ -498,6 +557,11 @@ def _cmd_barrer(args: argparse.Namespace) -> int:
+             from research.reality_check import format_verdict
+             print()
+             print(format_verdict(rc, symbol=args.symbol, timeframe=args.timeframe))
++        _decir("salida", fase="escritura",
++               mensaje=(f"barrido CPCV terminado: {pasan}/{n_trials} "
++                        f"sobreviven; escrito en {out.name}"),
++               detalle={"n_trials": n_trials, "pasan": pasan,
++                        "salida": out.name})
+         return 0
+     
+     # El camino "VECTORBT" se retiró el 2026-10-08, tras la auditoría del
+@@ -534,26 +598,129 @@ def _cmd_barrer(args: argparse.Namespace) -> int:
+         print(f"  LIMIT-BARS {args.limit_bars}: comprobacion del camino, NO una "
+               "medicion citable; el tramo se gasta IGUAL -se ha mirado-")
+ 
++    # Punto de cancelacion ANTES del gasto: parar aqui deja el tramo limpio
++    # de verdad y no debe nada a nadie.
++    _cancelar_si_piden(
++        "cancelado antes de declarar ensayos: el tramo queda limpio")
+     # Gasto y ensayos ANTES de la busqueda, en el mismo guardado.
+     registro.acumular_ensayos(reg, args.symbol, args.timeframe, n_grid,
+                               f"barrido de {n_grid} configuraciones sobre '{args.tramo}'")
+     registro.gastar_tramo(reg, args.symbol, args.timeframe, args.tramo,
+                           f"barrido de {n_grid} configuraciones eligió leyendo este tramo")
+     registro.guardar(reg)
++    _decir("gasto", fase="busqueda",
++           mensaje=(f"{n_grid} configuraciones declaradas y tramo "
++                    f"'{args.tramo}' gastado; empieza la busqueda"),
++           hecho=0, total=n_grid)
++
++    # Los enganches de progreso acumulan aqui lo medido, para que una
++    # cancelacion tenga las filas que ya estan sin rebuscarlas.
++    filas_hechas: list[dict[str, Any]] = []
++
++    def _nota_configuracion(regla: str, fila: dict[str, Any],
++                            hecho: int, total: int) -> None:
++        filas_hechas.append({**fila, "rule": regla})
++        _decir("configuracion", fase="busqueda",
++               mensaje=(f"configuracion {hecho}/{total}: {regla} "
++                        f"t_b={fila.get('t_b', 0):.2f}"),
++               hecho=hecho, total=total,
++               detalle={"regla": regla, "params": fila.get("params"),
++                        "t_b": fila.get("t_b"),
++                        "trades_b": fila.get("trades_b"),
++                        "pasa": bool(fila.get("survives_b"))})
+ 
+-    if args.workers > 1:
+-        results = barrido_paralelo(grids, workers=args.workers, csv=str(pin),
+-                                   train=train, test=test,
+-                                   timeframe=args.timeframe,
+-                                   limit_bars=args.limit_bars, split=corte,
+-                                   profile=profile)
+-    else:
+-        results = [sweep(rule, plans, train, test, args.timeframe,
+-                         profile=profile)
+-                   for rule, plans in grids.items()]
++    try:
++        if args.workers > 1:
++            results = barrido_paralelo(grids, workers=args.workers, csv=str(pin),
++                                       train=train, test=test,
++                                       timeframe=args.timeframe,
++                                       limit_bars=args.limit_bars, split=corte,
++                                       profile=profile,
++                                       al_completar=lambda fila, hecho, total:
++                                           _nota_configuracion(fila["rule"], fila,
++                                                               hecho, total),
++                                       cancelado=cancelado)
++        else:
++            results = []
++            for regla, planes in grids.items():
++                _cancelar_si_piden(
++                    "cancelado antes de la regla " + regla)
++
++                def _hook(fila: dict[str, Any], indice: int, total: int,
++                          _regla: str = regla, _planes: list = planes) -> None:
++                    _nota_configuracion(_regla, fila, indice + 1, len(_planes))
++                    _cancelar_si_piden(
++                        "cancelado a mitad de la regla " + _regla)
++
++                results.append(sweep(regla, planes, train, test,
++                                     args.timeframe, profile=profile,
++                                     al_fila=_hook))
++    except CancelacionSolicitada as exc:
++        # El operador paro el barrido. El tramo YA esta gastado, asi que lo
++        # unico honesto es escribir lo medido MARCADO incompleto, anotarlo en
++        # el registro como lo que es, y re-lanzar para que el worker ponga el
++        # trabajo en cancelled. Un JSON incompleto no puede usarse para
++        # elegir configuracion: el panel lo rechaza.
++        parciales = (exc.parcial if isinstance(exc.parcial, list) and exc.parcial
++                     else filas_hechas)
++        out = (registro.PROJECT_ROOT / "data" / "research"
++               / f"barrido-{args.symbol}-{args.timeframe}-{args.tramo}.json")
++        _atomic_write(out, json.dumps({
++            "symbol": args.symbol, "timeframe": args.timeframe,
++            "broker": profile.name,
++            "criterio": {"id": _criterio.get("criterio_id", ""),
++                         "hash": _criterio.get("hash", ""),
++                         "metodologia": _criterio.get("metodologia", {}),
++                         "estado": _criterio.get("metodologia_estado", ""),
++                         "uso": _criterio.get("metodologia_uso", "")},
++            "tramo": {"nombre": tramo["nombre"], "desde": tramo["desde"],
++                      "hasta": tramo["hasta"], "tipo": tramo["tipo"]},
++            "pin": {"archivo": pin.name, "sha256": digest,
++                    "velas": len(recorte.bars)},
++            "corte": corte,
++            "mitades": {"a": len(train.bars), "b": len(test.bars)},
++            "n_declarado": n_grid,
++            "n_completadas": len(parciales),
++            "limit_bars": args.limit_bars,
++            "incompleto": True,
++            "motivo_interrupcion": "cancelado por el operador",
++            "configurations": [
++                {"rule": f["rule"], "params": f["params"],
++                 "trades_b": f["trades_b"], "t_b": f["t_b"],
++                 "survives_b": f["survives_b"],
++                 "trade_returns_b": f.get("trade_returns_b")}
++                for f in parciales],
++            "reality_check": None,
++        }, ensure_ascii=False, indent=2))
++        reglas_vistas = sorted({f["rule"] for f in parciales})
++        registro.anotar_resultado(reg, args.symbol, args.timeframe,
++                                  tipo="barrido",
++                                  veredicto=(f"incompleto (cancelado): "
++                                             f"{len(parciales)}/{n_grid} "
++                                             f"configuraciones"),
++                                  detalle=f"{out.name}; pin {pin.name}",
++                                  regla=", ".join(reglas_vistas),
++                                  params={})
++        registro.guardar(reg)
++        _decir("cancelado", fase="cancelado",
++               mensaje=(f"barrido cancelado con {len(parciales)}/{n_grid} "
++                        f"configuraciones; parcial escrito en {out.name}"))
++        raise
+ 
+     n_trials = universe_size(results)
+-    rc = reality_check_over(results)
++    _cancelar_si_piden("cancelado antes de la correccion por pruebas multiples")
++
++    def _progreso_rc(hechas: int, total: int, n_boot: int, fase: str) -> None:
++        _decir("reality_check", fase="reality_check",
++               mensaje=(f"White Reality Check ({fase}): {hechas}/{total} "
++                        f"configuraciones, {n_boot} remuestreos por "
++                        f"configuracion"),
++               hecho=hechas, total=total,
++               detalle={"n_boot": n_boot, "fase": fase})
++
++    _decir("fase", fase="reality_check",
++           mensaje=f"White Reality Check sobre {n_trials} configuraciones")
++    rc = reality_check_over(results, progreso=_progreso_rc)
+     pasan = sum(int(r["passing"]) for r in results)
+     configurations = [
+         {"rule": r["rule"], "params": row["params"],
+@@ -567,6 +734,11 @@ def _cmd_barrer(args: argparse.Namespace) -> int:
+     _atomic_write(out, json.dumps({
+         "symbol": args.symbol, "timeframe": args.timeframe,
+         "broker": profile.name,
++        "criterio": {"id": _criterio.get("criterio_id", ""),
++                     "hash": _criterio.get("hash", ""),
++                     "metodologia": _criterio.get("metodologia", {}),
++                     "estado": _criterio.get("metodologia_estado", ""),
++                     "uso": _criterio.get("metodologia_uso", "")},
+         "tramo": {"nombre": tramo["nombre"], "desde": tramo["desde"],
+                   "hasta": tramo["hasta"], "tipo": tramo["tipo"]},
+         "pin": {"archivo": pin.name, "sha256": digest, "velas": len(recorte.bars)},
+@@ -615,25 +787,61 @@ def _cmd_barrer(args: argparse.Namespace) -> int:
+         from research.reality_check import format_verdict
+         print()
+         print(format_verdict(rc, symbol=args.symbol, timeframe=args.timeframe))
++    _decir("salida", fase="escritura",
++           mensaje=(f"barrido terminado: {pasan}/{n_trials} sobreviven B; "
++                    f"escrito en {out.name}"),
++           detalle={"p_value": (rc or {}).get("p_value"),
++                    "n_trials": n_trials, "pasan": pasan,
++                    "salida": out.name})
+     return 0
+ 
+ 
+ def _cmd_confirmar(args: argparse.Namespace) -> int:
++    """El subcomando de consola: la ejecucion de siempre, sin enganches."""
++    return ejecutar_confirmar(args)
++
++
++def ejecutar_confirmar(args: argparse.Namespace, *,
++                        progreso: Any = None, cancelado: Any = None) -> int:
+     """La confirmacion sobre un tramo de confirmacion: puerta, pin, gasto, medida.
+ 
+     Mide lo YA elegido -no es una busqueda, no declara ensayos nuevos- y el
+     liston viene del criterio del par, escrito antes de mirar. Todo lo barato
+     primero; el gasto, guardado, antes de medir.
++
++    `progreso` y `cancelado` son los enganches del worker (fase D); la
++    consola no los usa. Puntos de cancelacion: antes de gastar el tramo
++    (queda limpio) y entre configuraciones de la medicion (lo medido se
++    escribe MARCADO incompleto, igual que el barrido).
+     """
+     from research.confirmacion import medir
+     from research.replay import load_recording_from_csv
++    from research.sweep import CancelacionSolicitada
+     from strategies.registry import build_strategy
+ 
++    def _decir(tipo_evento: str, fase: str | None = None,
++               mensaje: str | None = None, hecho: int | None = None,
++               total: int | None = None, detalle: dict[str, Any] | None = None
++               ) -> None:
++        if progreso is not None:
++            progreso(tipo_evento, {"fase": fase, "mensaje": mensaje,
++                                   "hecho": hecho, "total": total,
++                                   "detalle": detalle})
++
++    def _cancelar_si_piden(mensaje: str) -> None:
++        if cancelado is not None and cancelado():
++            raise CancelacionSolicitada(mensaje)
++
+     reg = registro.cargar()
+     p, tramo = _requerir_par_prometido(reg, args, tipo_esperado="confirmacion")
+     # El perfil del broker DECLARADO, igual que en `barrer`: los costos de la
+     # medicion son los de su tabla, y la adivinanza no vuelve.
+     profile = load_broker(args.broker)
++    _decir("puerta", fase="puerta", mensaje=(
++        f"tramo '{args.tramo}' reclamaido: {tramo['desde']} -> {tramo['hasta']}"
++    ), detalle={"simbolo": args.symbol, "temporalidad": args.timeframe,
++                "tipo": tramo["tipo"], "broker": profile.name})
++    _cancelar_si_piden("cancelado en la puerta, el tramo queda limpio")
+ 
+     configs: list[tuple[str, dict[str, int], str]] = []
+     for i, texto in enumerate(args.config, start=1):
+@@ -672,15 +880,69 @@ def _cmd_confirmar(args: argparse.Namespace) -> int:
+           "escrito en el criterio antes de mirar")
+     print(f"  {len(configs)} configuracion(es)")
+ 
++    _cancelar_si_piden(
++        "cancelado antes de gastar el tramo de confirmacion: queda limpio")
+     registro.gastar_tramo(reg, args.symbol, args.timeframe, args.tramo,
+                           f"confirmacion de {len(configs)} configuraciones leyo "
+                           "este tramo")
+     registro.guardar(reg)
++    _decir("gasto", fase="medicion",
++           mensaje=(f"tramo '{args.tramo}' gastado; midiendo "
++                    f"{len(configs)} configuracion(es)"),
++           hecho=0, total=len(configs))
+ 
+-    filas = [medir(pin_rec, rule_id, params, motivo,
+-                   umbral_t=args.umbral_t, min_ops=args.min_ops,
+-                   profile=profile)
+-             for rule_id, params, motivo in configs]
++    filas: list[dict[str, Any]] = []
++    try:
++        for indice, (rule_id, params, motivo) in enumerate(configs, start=1):
++            _cancelar_si_piden(
++                "cancelado antes de medir la configuracion " + rule_id)
++            fila = medir(pin_rec, rule_id, params, motivo,
++                         umbral_t=args.umbral_t, min_ops=args.min_ops,
++                         profile=profile)
++            filas.append(fila)
++            _decir("configuracion", fase="medicion",
++                   mensaje=(f"medida {indice}/{len(configs)}: {rule_id} "
++                            f"|t|={fila['t_stat']:.2f}, {fila['trades']} ops"),
++                   hecho=indice, total=len(configs),
++                   detalle={"regla": rule_id, "params": params,
++                            "t_stat": fila["t_stat"],
++                            "trades": fila["trades"],
++                            "veredicto": fila["veredicto"]})
++    except CancelacionSolicitada:
++        # Lo medido se escribe MARCADO incompleto. El tramo ya esta gastado y
++        # eso no se des-hace; un veredicto de confirmacion sobre datos a
++        # medias no es ni aguanta ni refutada: es incompleto.
++        out = (registro.PROJECT_ROOT / "data" / "research"
++               / f"confirmacion-{args.symbol}-{args.timeframe}-{args.tramo}.json")
++        _atomic_write(out, json.dumps({
++            "symbol": args.symbol, "timeframe": args.timeframe,
++            "broker": profile.name,
++            "criterio": {"id": (p.get("criterio") or {}).get("criterio_id", ""),
++                         "hash": (p.get("criterio") or {}).get("hash", "")},
++            "tramo": {"nombre": tramo["nombre"], "desde": tramo["desde"],
++                      "hasta": tramo["hasta"], "tipo": tramo["tipo"]},
++            "pin": {"archivo": pin.name, "sha256": digest,
++                    "velas": len(pin_rec.bars)},
++            "liston": {"umbral_abs_t": args.umbral_t,
++                       "min_operaciones": args.min_ops},
++            "incompleto": True,
++            "motivo_interrupcion": "cancelado por el operador",
++            "n_completadas": len(filas),
++            "filas": filas,
++            "veredicto": {"resultado": "incompleto",
++                          "porque": "cancelado por el operador"},
++        }, ensure_ascii=False, indent=2))
++        registro.anotar_resultado(reg, args.symbol, args.timeframe,
++                                  tipo="confirmacion",
++                                  veredicto="incompleto (cancelado)",
++                                  detalle=out.name,
++                                  regla=configs[0][0] if configs else "",
++                                  params=configs[0][1] if configs else {})
++        registro.guardar(reg)
++        _decir("cancelado", fase="cancelado",
++               mensaje=(f"confirmacion cancelada con {len(filas)}/{len(configs)} "
++                        f"medidas; parcial en {out.name}"))
++        raise
+     global_ = _veredicto_confirmacion(filas)
+ 
+     out = (registro.PROJECT_ROOT / "data" / "research"
+@@ -688,6 +950,8 @@ def _cmd_confirmar(args: argparse.Namespace) -> int:
+     _atomic_write(out, json.dumps({
+         "symbol": args.symbol, "timeframe": args.timeframe,
+         "broker": profile.name,
++        "criterio": {"id": (p.get("criterio") or {}).get("criterio_id", ""),
++                     "hash": (p.get("criterio") or {}).get("hash", "")},
+         "tramo": {"nombre": tramo["nombre"], "desde": tramo["desde"],
+                   "hasta": tramo["hasta"], "tipo": tramo["tipo"]},
+         "pin": {"archivo": pin.name, "sha256": digest, "velas": len(pin_rec.bars)},
+@@ -721,6 +985,12 @@ def _cmd_confirmar(args: argparse.Namespace) -> int:
+     print(f"  VEREDICTO: {global_['resultado'].upper()}")
+     print(f"  {global_['porque']}")
+     print(f"\n  escrito en {out}")
++    _decir("salida", fase="escritura",
++           mensaje=(f"confirmacion terminada: {global_['resultado']}; "
++                    f"escrito en {out.name}"),
++           detalle={"resultado": global_["resultado"],
++                    "porque": global_.get("porque"),
++                    "salida": out.name})
+     return 0
+ 
+ 

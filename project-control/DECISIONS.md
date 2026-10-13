@@ -217,3 +217,56 @@ precisamente el único que nadie ha mirado.
 
 **Consecuencia asumida:** el roadmap empieza por un arnés de tests (R-001), no
 por lógica de trading, porque sin él no se puede medir nada de lo demás.
+
+---
+
+## D-031 — El panel no ejecuta análisis del bot: lee sus artefactos o se retira
+
+**Decisión:** los endpoints `/api/learning` no construyen un `LearningLoop`
+del bot dentro del proceso del panel. `GET /api/learning/report` lee
+`data/learning/report.json` —el artefacto que escribe el bot cuando corre
+SU análisis— y responde 404 con el motivo mientras no exista. `POST
+/api/learning/run` se retira con 501: si algún día hace falta arrancar el
+análisis desde la interfaz, el camino es un trabajo de la cola del bot, no
+un import cruzado.
+
+**Por qué:** durante semanas esos endpoints hicieron `from app.learning
+import LearningLoop`, que en el panel resuelve a un módulo inexistente: un
+500 permanente que ningún test pisaba (ISS-028). Y de haber resuelto, habría
+sido el panel ejecutando la lógica del bot — exactamente la excepción que
+D-017 existe para impedir. La valla es AST (mira nodos de importación, no
+texto): la primera versión del test se disparó a sí misma con el docstring
+que explicaba el problema.
+
+**Consecuencia asumida:** el panel no puede refrescar un reporte de
+aprendizaje por su cuenta. El bot escribe el artefacto cuando corre su
+análisis; mientras no lo corra, no hay reporte y el 404 lo dice con nombre
+y apellido. La capacidad no se pierde: se muda al lugar donde debe
+ejecutarse.
+
+---
+
+## D-032 — Una sola puerta de lectura de precios, y exacta: round_trip
+
+**Decisión:** todo camino de MEDIDA lee las velas por `research/io.read_frame`
+(con `float_precision="round_trip"`): el entrenamiento ML
+(`training/train_universal.py`), el walk-forward (`scripts/walkforward_eval.py`)
+y el holdout (`research/holdout_eval.py`). El feed del runtime
+(`adapters/market_data/csv_feed.py`) lleva la misma bandera con el motivo
+escrito, sin importar el paquete de research.
+
+**Por qué:** el parser por defecto de pandas puede releer un double UN ULP
+por debajo de lo escrito — medido: 25.650 valores del EURUSD_H1.csv cambiaban
+un ulp, la cadena `1.2794699999999999` volvía como `1.27947` (otro double), y
+el `data_hash` del fichero dejaba de cuadrar aunque el fichero fuera
+exactamente el descargado (ISS-037). Por la puerta pasaban el hash y el
+replay, pero el entrenamiento y el walk-forward leían por su cuenta: un
+modelo ajustado sobre precios que nadie más puede releer iguales es una
+medida irreproducible por construcción.
+
+**Qué se paga:** `csv_feed` duplica la bandera en vez de importar la puerta.
+Es deliberado: un adaptador del bot no debe depender del paquete de research
+(la dirección de dependencia no se abre por ahorrar una línea). La
+conformidad entre ambas lecturas la vigila la valla del hash y la
+equivalencia serie/paralelo; si la puerta cambia de criterio, el
+`test_cost_conformity` del mismo precio es donde se verá.

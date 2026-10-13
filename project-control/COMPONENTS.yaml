@@ -371,14 +371,22 @@ componentes:
   - id: PORT-001
     nombre: "Optimizador de cartera"
     dominio: 6
-    descripcion: "Reparte riesgo entre activos por correlacion, con topes de peso y riesgo total."
-    implementacion: parcial
-    validacion: no_probada
+    descripcion: "Instrumento HRP que existe, esta probado como lo que es, y sigue DESCONECTADO: nada lo importa."
+    implementacion: existe
+    validacion: probada
     operacion: no_operativa
     criticidad: media
-    rutas: ["risk/portfolio_optimizer.py", "app/decision_core.py:470", "config/gts.yaml:431-437"]
+    rutas: ["risk/portfolio_optimizer.py", "app/features.py (validacion del bloque de config)", "config/gts.yaml:431"]
     depende_de: [RES-001]
-    consumido_por: ["app/decision_core.py"]
+    consumido_por: []
+    nota_estado: >
+      Re-verificado 2026-10-12 (ISS-007): NINGUN modulo del camino de decision
+      lo importa (valla AST en tests/test_portfolio_optimizer_honesto.py que
+      falla el dia que alguien lo cablee). El constructor se niega en voz alta
+      sin riskfolio-lib; la libreria esta instalada (7.4.0) pero SIN declarar
+      en requirements.txt. codependence SI se lee (ISS-008 obsoleta). Cablearlo
+      es decision de riesgo del dueno: exige libreria declarada y tests de
+      comportamiento en el mismo commit.
     requisitos:
       - "max_portfolio_risk y max_symbol_weight se aplican de verdad"
       - "No se traga el AttributeError"
@@ -427,12 +435,19 @@ componentes:
     dominio: 7
     descripcion: "El mismo trade debe dar el mismo PnL neto por los tres caminos."
     implementacion: existe
-    validacion: DEBIL
+    validacion: probada
     operacion: medida
     criticidad: alta
     rutas: ["tests/test_trade_tape_equivalencia.py", "tests/test_cost_conformity.py", "research/trade_tape.py"]
     depende_de: [COST-001]
     consumido_por: []
+    nota_estado: >
+      La validacion paso de DEBIL a probada el 2026-10-12 (ISS-005): el test
+      de conformidad conduce PurgedWalkForwardBacktest._compute_pnl con un
+      fold de exactamente un trade (lunes->miercoles, mid-a-mid) y compara su
+      neto con la cartera simulada con la tolerancia de 2 centavos
+      documentada. Antes el bruto se calculaba A MANO y el motor no se
+      ejercia en ninguna parte.
     requisitos:
       - "Un test que construya el motor del backtest y lo compare con la simulacion"
     criterios_aceptacion:
@@ -924,36 +939,45 @@ componentes:
     nombre: "Integracion continua"
     dominio: 14
     descripcion: "Ejecucion automatica de la suite en cada commit."
-    implementacion: ausente
-    validacion: no_probada
+    implementacion: parcial
+    validacion: probada
     operacion: no_operativa
     criticidad: alta
-    rutas: []
+    rutas: ["scripts/suite_completa.py"]
     depende_de: [QA-001]
     consumido_por: []
     requisitos: ["Ningun commit puede entrar sin la suite en verde"]
+    nota_estado: >
+      PARCIAL POR FALTA DE REMOTE (ISS-012, 2026-10-12): el repositorio es
+      local (git remote -v vacio), asi que no hay push que dispare nada y un
+      .github/workflows seria decoracion. La puerta que existe es LOCAL:
+      scripts/suite_completa.py ejecuta ambas suites en una orden, reporta
+      el CODIGO DE SALIDA de cada una y pasa --basetemp a un directorio
+      fresco (el basetemp por defecto de pytest quedo bloqueado en esta
+      maquina y enveneno una corrida entera con errores de setup). El dia
+      que haya remote, la orden se mueve a un workflow tal cual.
     criterios_aceptacion: ["Existe un pipeline que corre tests + mypy + ruff"]
-    tests: []
-    resultados_tests: "NO EXISTE (.github ausente, medido hoy)"
-    evidencias: ["Test-Path .github -> False (medido hoy)", "pyproject define pytest, mypy y ruff SIN ningun runner que los ejecute automaticamente"]
+    tests: ["scripts/suite_completa.py (la puerta local: ambas suites, codigos de salida)"]
+    resultados_tests: "verde el 2026-10-12 (bot exit 0: 1648 coleccionados, 1594 pasan, 54 saltos con motivo; panel exit 0: 500/500)"
+    evidencias: ["git remote -v -> VACIO (medido 2026-10-12): sin remote no hay push que disparar", "suite-completa-20261012c.txt: ambas suites exit 0", "pyproject define pytest, mypy y ruff; el runner local ejecuta pytest, mypy/ruff siguen sin entrar en ninguna puerta"]
     deficiencies: [
       "Los 3 fallos de ISS-01 llegaron a HEAD porque nada los ejecuta automaticamente",
       "Un lint final post-sesion quedo sin correr (README memory-graph, 2026-10-07)"
     ]
-    bloqueos: []
-    siguiente_accion: "Es la infraestructura que convierte todo lo demas en sostenido. Ver R-006."
-    ultima_revision: "2026-10-10"
+    bloqueos: ["Sin remote no puede existir CI-on-push: R-015 queda en PARCIAL por decision de infraestructura, no por descuido"]
+    siguiente_accion: "Si el dueno publica el repositorio: mover la orden de scripts/suite_completa.py a .github/workflows tal cual. Antes de R-006 del roadmap antiguo (ver ROADMAP R-015)."
+    ultima_revision: "2026-10-12"
 
   # ─────────── DOMINIO 15: Calidad del software y versiones ───────────
   - id: QA-001
     nombre: "Suite de tests del bot"
     dominio: 15
-    descripcion: "1384 tests que no necesitan MT5 (por diseno: una falha de coleccion ES la senal)."
+    descripcion: "1648 tests que no necesitan MT5 (por diseno: una falha de coleccion ES la senal)."
     implementacion: existe
     validacion: probada
     operacion: medida
     criticidad: critica
-    rutas: ["tests/ (79 ficheros, 23 036 LOC)", "pyproject.toml [tool.pytest.ini_options]"]
+    rutas: ["tests/ (104 ficheros)", "pyproject.toml [tool.pytest.ini_options]", "scripts/suite_completa.py (la puerta que las corre a las dos)"]
     depende_de: []
     consumido_por: ["operador", "RELEASE_GATES"]
     requisitos:
@@ -962,15 +986,14 @@ componentes:
       - "filterwarnings error::DeprecationWarning"
     criterios_aceptacion: ["exit 0 en la suite completa"]
     tests: ["(es el conjunto)"]
-    resultados_tests: "1381/1384 PASA · 3 FALLAN (ISS-01) · 10 se saltan (ver abajo) · exit 1 · medido hoy"
+    resultados_tests: "VERDE el 2026-10-12 (etapa estructural): 1648 coleccionados, 1594 pasan, 54 saltan CON MOTIVO declarado, 0 fallan, exit 0. Panel: 500/500, exit 0. Ambos via scripts/suite_completa.py."
     evidencias:
-      - "Corrida completa: myenv\\Scripts\\python.exe -m pytest tests -> exit 1, 3 FAILED en test_sweep_parallel.py"
-      - "test_sweep_parallel.py AISLADO: 11/11 VERDE"
-    deficiencies:
-      - "10 skips, 5 de los cuales son guardianes de la evidencia: test_reality_check.py:538, test_sweep_universe.py:169 y :376, test_shipped_signal_source.py:100 y :132. El unico test que ejecuta el Reality Check de punta a punta NUNCA CORRE."
-    bloqueos: [ISS-01]
-    siguiente_accion: "ISS-01. Verificar si el resultado en disco (existen barrido-*.json con n_trials) permite convertir esos skips en fallos anunciados."
-    ultima_revision: "2026-10-10"
+      - "Corrida de certificacion: suite-completa-20261012c.txt (bot exit 0, panel exit 0)"
+      - "Los 5 guardianes que saltaban por ISS-006 CORREN ya contra artefactos reales y fallan si falta lo que vigilan; los 6 de mecanica de corte cableados a un CSV de otra era revivieron con un CSV existente y la identidad de su cabecera"
+    deficiencies: []
+    bloqueos: []
+    siguiente_accion: "Ninguna. La senal automatica esta viva: el recuento y la clasificacion de saltos estan en EVIDENCE.yaml."
+    ultima_revision: "2026-10-12"
 
   - id: QA-002
     nombre: "Suite de tests del panel"

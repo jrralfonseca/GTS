@@ -15,15 +15,18 @@
 #   test rojo que se corrige con una linea (R-001) es lo que hace R-002 medible.
 
 meta:
-  fecha: "2026-10-11"
-  commit: "ffbe39f"
+  fecha: "2026-10-12"
+  commit: "tras 9efed97 (etapa estructural)"
   regla_de_orden: "correccion > control de riesgo > validez de pruebas > trazabilidad > velocidad > funcionalidad"
   ninguna_tarea_arranca_sin_aprobacion: true
   estado_del_sistema: >
     PARADO POR DISENO: sin evidencia confirmada el bot sigue negandose a
-    arrancar. La suite del bot esta VERDE y confirmada con corrida propia
-    (2026-10-11); la del panel tiene un rojo de infraestructura (ISS-031),
-    no de codigo.
+    arrancar. AMBAS suites en VERDE y certificadas (2026-10-12, etapa
+    estructural): bot 1648 coleccionados / 1594 pasan / 54 saltos con
+    motivo / exit 0; panel 500/500 / exit 0. La puerta es
+    scripts/suite_completa.py. Ninguna metodologia aprobada; el registro
+    no confirma ninguna regla; el bloque limpio de EURUSD H1 2010-2018
+    (Fase 1) espera a la Fase 2 del plan de cualificacion.
 
 # ═══════════════════════════════════════════════════════════════════════════
 # BLOQUE A — La verdad antes que nada (barato, desbloquea la medicion)
@@ -205,6 +208,22 @@ tareas:
     evidencia_esperada: "EVIDENCE.yaml -> suites[bot].skipped con el recuento nuevo y el motivo de cada uno"
     coste: "bajo"
     riesgo: "nulo"
+    estado: COMPLETADO
+    completado: "2026-10-12"
+    evidencia: >
+      Los 5 guardianes corren contra artefactos reales y fallan si falta lo
+      que vigilan: reality_check apunta al barrido real (y la leccion mejora:
+      el mejor |t| del fichero, 8.29, es el de una configuracion de 3
+      trades); sweep_universe exige n_trials presente E igual al recuento de
+      filas, y el guardian de la serie mira barrido-*.json y sweep-*.json
+      fallando si no hay nada que vigilar; shipped_signal_source cambia sus
+      dos tests de premisa muerta por la valla de citas y el estado honesto
+      del registro. Se encontraron ADEMAS 6 guardianes de mecanica del
+      corte que saltaban con motivo falso ("no bars CSV" con tres CSV en el
+      directorio) por estar cableados a un XAUUSD_H1.csv de otra era:
+      revivieron con un CSV existente y la identidad de su cabecera.
+      Recuento: 54 saltos con motivo frente a 79, todos declarando el
+      suyo. Ver ISS-006.
 
   - id: R-007
     prioridad: 7
@@ -225,6 +244,17 @@ tareas:
     evidencia_esperada: "El mismo test, con dos motores ejercidos de verdad"
     coste: "bajo"
     riesgo: "nulo"
+    estado: COMPLETADO
+    completado: "2026-10-12"
+    evidencia: >
+      _neto_backtest_usd() conduce PurgedWalkForwardBacktest._compute_pnl con
+      un fold de 49 barras y EXACTAMENTE una senal (lunes 00:00 long, label
+      mid-a-mid 1.1000->1.1100, hold 48, salida miercoles 00:00). El test
+      exige un solo trade, con sus barras de entrada y salida bien dichas y
+      sin clipped, verifica que el bruto del motor es el retorno del label
+      por el nocional, y compara neto y coste con la cartera simulada con la
+      tolerancia de 2 centavos de siempre. 2/2 verde. COMPONENTS.yaml
+      BT-002 paso de validacion DEBIL a probada.
 
   - id: R-008
     prioridad: 8
@@ -248,6 +278,25 @@ tareas:
     coste: "bajo"
     riesgo: "nulo"
     nota: "VERIFICAR ANTES DE ARREGLAR. Puede que ya funcione y solo le falte el test."
+    estado: VERIFICADO_COMO_DESCONECTADO
+    verificado: "2026-10-12"
+    evidencia: >
+      Verificado antes de arreglar, como pedia la nota, y la respuesta
+      cambia la tarea: el optimizador ES un instrumento completo (guarda el
+      import con negativa ruidosa, codependence SI se lee y llega a
+      rp.HCPortfolio - ISS-008 obsoleta), pero NINGUN modulo del camino de
+      decision lo importa, y nunca lo importo en este arbol: la evidencia
+      de "app/decision_core.py:470" apuntaba a codigo de una etapa ya
+      reescrita. Tres vallas nuevas fijan el estado
+      (tests/test_portfolio_optimizer_honesto.py): negativa ruidosa sin
+      libreria, validacion del bloque de config en el puente, y valla AST
+      que falla el dia que alguien lo cablee - porque cablearlo es un
+      cambio de comportamiento del RIESGO que exige, en el mismo commit,
+      riskfolio-lib declarado en requirements (hoy instalado 7.4.0 pero SIN
+      declarar) y los tests de comportamiento que no existen.
+    siguiente_accion: >
+      Decision del dueno: cablearlo al camino de decision (con libreria
+      declarada y tests) o dejarlo como instrumento. No se hace sin encargo.
 
   - id: R-009
     prioridad: 9
@@ -276,6 +325,21 @@ tareas:
       Corregir la cita NO cambia el resultado. Puede que la decision de seguir
       operandola como default sea del dueno y deba quedar escrita como tal, con su
       razon. Eso es R-010.
+    estado: COMPLETADO
+    completado: "2026-10-12"
+    evidencia: >
+      Las 5 citas a sweep-H4.json retiradas de config y README; la
+      justificacion de la regla embarcada dice ahora la verdad COMPLETA (es
+      la regla de referencia del camino de reglas; el unico barrido en disco
+      no sostiene nada, 0/5 p=0.9935; el registro no confirma ninguna regla
+      ninguna). Valla de citas nueva: TODA ruta data/research/*.json citada
+      en config o README existe en disco, y el conteo minimo es parte de la
+      asercion. Los huecos de validez del README quedaron sincronizados
+      (costes: cerrado; correccion del barrido: cerrada para el barrido).
+      El docstring del grafo describe el arbol real (el ciclo app<->runtime
+      murio con la extraccion de decisions/; ISS-021 resuelta). Falta solo
+      el resto de ISS-019 (justificacion del stack web, una linea de
+      documentacion en SYSTEM_MAP): menor y sin riesgo.
 
   - id: R-010
     prioridad: 10
@@ -441,6 +505,19 @@ tareas:
     evidencia_esperada: "Un pipeline que ya ha rechazado un commit"
     coste: "bajo"
     riesgo: "nulo"
+    estado: PARCIAL_POR_FALTA_DE_REMOTE
+    evidencia: >
+      2026-10-12: el repositorio NO TIENE REMOTE (git remote -v vacio),
+      asi que no hay push que disparar y un .github/workflows seria
+      decoracion. La puerta que existe es LOCAL: scripts/suite_completa.py
+      ejecuta ambas suites en una orden, reporta el CODIGO DE SALIDA de
+      cada una, avisa de los dos entornos necesarios y pasa --basetemp a
+      un directorio fresco (el basetemp por defecto quedo bloqueado en
+      esta maquina y enveneno una corrida con 359+ errores de setup).
+      Certificada en verde dos veces el 2026-10-12. ruff y mypy siguen
+      fuera de la puerta: no estan definidos en pyproject para nada que
+      los pise.
+    siguiente_accion: "Si el dueno publica el repositorio: la orden se mueve a .github/workflows tal cual, y el paso gana ruff+mypy."
 
   - id: R-016
     prioridad: 16

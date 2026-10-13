@@ -7,17 +7,52 @@
 # QUE NO ES: un informe. Los informes se archivan; esto se re-genera.
 
 meta:
-  fecha: "2026-10-11"
-  commit: "ffbe39f365bb8ec06fc54ab269b860258ad57f27"
+  fecha: "2026-10-12"
+  commit: "etapa estructural, tras 5bb0644"
   maquina: Windows · Python 3.12 (myenv) · Python 3.12 (dashboard/.venv)
-  regla_basetemp: "SIEMPRE fuera del arbol del repo. Dentro, test_research_cannot_trade da falso positivo."
-  commits_desde_la_auditoria_anterior: ["44f8591", "e801d4e", "ffbe39f"]
+  regla_basetemp: "SIEMPRE fuera del arbol del repo Y en un directorio fresco: el basetemp por defecto de pytest (%TEMP%\\pytest-of-<usuario>) quedo bloqueado en esta maquina (WinError 5) y enveneno una corrida entera con 359+ errores de setup que se leian como rojo de codigo. scripts/suite_completa.py pasa --basetemp a un mkdtemp propio."
+  commits_desde_la_auditoria_anterior: ["44f8591", "e801d4e", "ffbe39f", "c0f35c7", "9efed97", "5bb0644"]
   auditoria_anterior: "audit/ (borrada del arbol, recuperable en HEAD) · 2026-10-09 · base 32b6f8e"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SUITES DE TESTS — el denominador de todo lo demas
 # ═══════════════════════════════════════════════════════════════════════════
 suites:
+
+  - suite: bot_y_panel_completos
+    comando: 'myenv\Scripts\python.exe -m scripts.suite_completa   (la puerta local: ambas suites, codigos de salida, basetemp fresco)'
+    fecha: "2026-10-12"
+    collected: 2148
+    passed: 2094
+    failed: 0
+    skipped: 54
+    exit_code: 0
+    conclusion: >
+      VERDE en ambas, certificacion de la etapa estructural: bot 1648
+      coleccionados / 1594 pasan / 54 saltos con motivo / exit 0; panel
+      500/500 / 0 saltos / exit 0. La corrida valida el arbol con los
+      arreglos de la etapa: --resume sin off-by-one (ISS-036), lector
+      round_trip (ISS-037), /api/learning honesto (ISS-028), lookback de
+      la procedencia (ISS-038), conformidad de costes ejerciendo el motor
+      (ISS-005), 11 guardianes revividos (ISS-006) y los cuatro lectores
+      de precios enrutados por la puerta. Los 54 saltos (54, no 79 como
+      el 2026-10-11: los guardianes revividos corren) declaran su motivo
+      en el propio test; los clusters son el bundle gts/ retirado y los
+      artefactos de la generacion anterior.
+    incidente_resuelto:
+      titulo: "El basetemp por defecto de pytest bloqueado enveneno una corrida entera"
+      sintoma: >
+        La primera corrida de la puerta local salio con 359+ errores de
+        setup y exit 1 en ambas suites, sin un solo fallo de codigo.
+      causa: >
+        %TEMP%\pytest-of-fiver quedo con Access denied (WinError 5,
+        os.scandir en la creacion del basetemp numerado). Ningun test
+        llego a correr en los ficheros afectados.
+      fix: "scripts/suite_completa.py pasa --basetemp a un tempfile.mkdtemp fresco por corrida."
+      leccion: >
+        Un rojo de setup masivo con cero FAILED es infraestructura, no
+        codigo. El codigo de salida sigue siendo el veredicto, pero hay
+        que mirar QUE fallo: solo-ERROR es la firma del entorno.
 
   - suite: bot
     comando: 'myenv\Scripts\python.exe -m pytest tests -p no:cacheprovider -q --no-header --basetemp FUERA_DEL_ARBOL'
@@ -29,66 +64,36 @@ suites:
     exit_code: 0
     duracion: "9-10 min"
     conclusion: >
-      VERDE, re-corrida tras el fix del reloj del broker (ISS-035): el
-      detector de barras en formacion comparaba timestamps en hora del
-      broker (EEST = UTC+3) contra el reloj local (UTC), clasificando
-      toda barra reciente como "en formacion". Fix: `_reloj_del_broker()`
-      en el adaptador usa `terminal.server_time()`. 3 tests nuevos
-      (test_reloj_del_broker.py) con un doble cuyo reloj va 3h adelante.
-      Cero fallos; los 79 saltos declaran su motivo (artefactos que la
-      limpieza retiro).
+      VERDE, re-corrida tras el fix del reloj del broker (ISS-035). Entrada
+      historica: superada por la corrida del 2026-10-12 (bot_y_panel_completos).
     saltos:
       total: 79
       nota: >
         Cada skip declara su motivo en el propio test (mecanismo de ffbe39f).
-        Los clusters grandes son los artefactos que la limpieza de la nueva
-        etapa retiro: bundle gts/ (test_colab_bundle 28 + test_kaggle_layout 8)
-        y barridos/checkpoints ausentes (test_sweep_universe, test_sweep_parallel,
-        test_scaler_canonical 10, test_research_window 4).
-    orden_adverso:
-      comando: 'myenv\Scripts\python.exe -m pytest tests\test_kaggle_layout.py tests\test_sweep_parallel.py --basetemp FUERA_DEL_ARBOL'
-      fecha: "2026-10-11"
-      resultado: "exit 0 (kaggle_layout: 3 pasan, 8 saltan; sweep_parallel: 7 pasan, 4 saltan)"
-      conclusion: "El orden que reprodujo los 3 fallos historicos (ISS-001) sale limpio: la contaminacion del arnes esta muerta."
-    incidente_resuelto:
-      titulo: "La suite se congelaba en coleccion: cache de numba envenenada"
-      sintoma: >
-        Tres corridas >60 min sin pasar del segundo modulo de test; un nucleo al
-        100%; ningun basetemp creado; ningun resultado emitido.
-      causa: >
-        research/__pycache__/labeling._apply_triple_barrier_numba-93.py312.*.nbc
-        y .nbi, escritos el 2026-10-10 20:50, congelaban la importacion de
-        research.labeling. Demostracion: el mismo labeling.py copiado con cache
-        virgen importa en 1.02 s; el original, bloqueo indefinido. El codigo esta
-        sano. Ver ISS-030.
-      fix: "Los 3 ficheros apartados a %TEMP%\\gts-numba-cache-backup (nada borrado). Cache regenerada verificada sana: un segundo proceso importa contra ella en 1.27 s."
-      leccion: "Una suite que no avanza y quema un nucleo no es una suite lenta: es un import congelado. Mirar basetemp y el contador antes de esperar."
+        El 2026-10-12 el recuento baja a 54: los guardianes de ISS-006
+        corren ya, y el resto sigue declarando el suyo.
 
   - suite: panel
     comando: 'dashboard\.venv\Scripts\python.exe -m pytest dashboard\tests -p no:cacheprovider -q --no-header --basetemp FUERA_DEL_ARBOL'
-    fecha: "2026-10-11"
-    collected: 447
-    passed: 447
+    fecha: "2026-10-12"
+    collected: 500
+    passed: 500
     failed: 0
     skipped: 0
     exit_code: 0
     conclusion: >
-      VERDE tras la reestructuracion del panel, R-012 (metricas con fuente y
-      N + procedencia), R-013 (alertas Telegram, 17 tests con canal simulado
-      y aviso real confirmado por el dueno) e ISS-034 (la puerta R:R fuera
-      del panel: esquema sin ella, POST que la descarta con respuesta
-      explicita). La suite del BOT se re-corrio tras ISS-034 (config.py es
-      del bot): 1463/1384/79, exit 0.
+      VERDE con los tests nuevos de la etapa: inferencia de lookback (3),
+      learning sin boton (4). Cero saltos. Corrida via la puerta local.
 
   - suite: lint_y_tipos
     comando: "myenv\\Scripts\\python.exe -m ruff check . ; myenv\\Scripts\\python.exe -m mypy"
     estado: NO_EJECUTADO
     fecha: "2026-10-10"
-    conclusion: "Definidos en pyproject.toml, sin CI que los ejecute (ISS-012). No medidos hoy."
+    conclusion: "Definidos en pyproject.toml, sin puerta que los ejecute (ISS-012, PARCIAL). No medidos hoy."
 
   - suite: ci
-    estado: INEXISTENTE
-    evidencia: "Test-Path .github -> False"
+    estado: INEXISTENTE_POR_FALTA_DE_REMOTE
+    evidencia: "git remote -v -> vacio (medido 2026-10-12). La puerta que existe es local: scripts/suite_completa.py."
     ver: ISS-012
 
 # ═══════════════════════════════════════════════════════════════════════════

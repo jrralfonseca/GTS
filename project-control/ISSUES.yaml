@@ -175,7 +175,19 @@ issues:
     fix_propuesto: "Que _neto_backtest_usd() ejecute una operacion a traves de PurgedWalkForwardBacktest y compare su neto con el de la simulacion."
     coste: bajo
     reversibilidad: trivial
-    siguiente_accion: "R-007"
+    estado: RESUELTO
+    resuelto_por: >
+      2026-10-12: `_neto_backtest_usd()` conduce
+      `PurgedWalkForwardBacktest._compute_pnl` con un fold de 49 barras y
+      EXACTAMENTE una senal (lunes 00:00 long, label mid-a-mid 1.1000->1.1100,
+      hold 48, salida miercoles 00:00). El test exige un solo trade, con las
+      barras de entrada y salida bien dichas, sin `clipped`, verifica que el
+      bruto del motor es el retorno del label por el nocional, y compara el
+      neto y el coste con el motor de simulacion con la tolerancia de 2
+      centavos de siempre. La valla ahora se rompe si el motor cambia su
+      aritmetica, que es lo que una valla de conformidad debe.
+    verificado: "2026-10-12: tests/test_cost_conformity.py 2/2 verde."
+    siguiente_accion: "ninguna"
 
   - id: ISS-006
     titulo: "Cinco guardianes de la evidencia se saltan en silencio"
@@ -201,7 +213,28 @@ issues:
     fix_propuesto: "Apuntar los skips a data/research/barrido-*.json en vez de a data/research/sweep-H4.json. Si el fichero no esta, que el test FALLE, no que salte."
     coste: bajo
     reversibilidad: trivial
-    siguiente_accion: "R-008"
+    estado: RESUELTO
+    resuelto_por: >
+      2026-10-12: los cinco saltos corren ya contra artefactos reales y
+      fallan en vez de saltar cuando falta lo que vigilan.
+      (1) test_reality_check: apunta a barrido-XAUUSD-M15-entrenar-2.json y
+      la leccion mejora - el mejor |t| del fichero (8.29) pertenece a la
+      configuracion con MENOS trades (3), y el p del propio fichero (0.9935)
+      es la respuesta que sustituye al ratio.
+      (2) test_shipped_signal_source: los dos tests de premisa muerta
+      (meseta y lista constante contra un fichero que nunca existio aqui)
+      se sustituyen por la valla de citas y por el estado honesto del
+      registro (ver ISS-009).
+      (3) test_sweep_universe: el guardian del universo exige n_trials
+      presente Y igual al recuento de filas; el guardian de la serie mira
+      barrido-*.json y sweep-*.json y FALLA si no hay nada que vigilar.
+      (4) Se encontraron y revivieron ademas SEIS guardianes de mecanica del
+      corte (split_csv) que saltaban con "no bars CSV in data/raw" mientras
+      habia tres CSV en el directorio: estaban cableados a XAUUSD_H1.csv, un
+      fichero de la era anterior. Ahora usan un CSV existente con la
+      identidad de su cabecera.
+    verificado: "2026-10-12: test_sweep_universe 19/19 corriendo sin saltos; test_reality_check 41/41; test_shipped_signal_source 7/7."
+    siguiente_accion: "ninguna"
 
   - id: ISS-007
     titulo: "El optimizador de cartera esta declarado activo y no tiene un solo test"
@@ -225,11 +258,27 @@ issues:
     por_que_importa: >
       Un componente declarado activo, sin test y con una excepcion capturada, es
       indistinguible de un componente roto y de uno que funciona. No es assertion.
-    pruebas_que_lo_fijan: "NINGUNA."
+    pruebas_que_lo_fijan: "tests/test_portfolio_optimizer_honesto.py (3 vallas, 2026-10-12)."
     fix_propuesto: "Un test que demuestre que cambiar max_symbol_weight cambia el resultado, mas uno que falle si la rama se traga una excepcion."
     coste: bajo
     reversibilidad: trivial
-    siguiente_accion: "R-009. Verificar antes de arreglar: puede que ya funcione."
+    estado: VERIFICADO_COMO_INSTRUMENTO_DESCONECTADO
+    resuelto_por: >
+      Re-verificado el 2026-10-12 contra el arbol actual, y la premisa
+      original quedo obsoleta en dos de sus tres partes: (1) decision_core ya
+      no existe como era ni referencia al optimizador - NINGUN modulo del
+      camino de decision importa risk.portfolio_optimizer (valla AST que
+      falla el dia que alguien lo cablee, exigiendo en el mismo commit la
+      libreria declarada y los tests). (2) riskfolio-lib 7.4.0 SI esta
+      instalado en myenv, aunque SIN declarar en requirements.txt - hoy no
+      importa porque nadie lo importa; el dia que se cablee, requirements
+      tiene que ganarlo en el mismo commit. (3) El constructor se niega EN VOZ
+      ALTA sin la libreria: la negativa ruidosa esta, con su test (salta
+      honestamente si la libreria esta, porque la negativa no se puede
+      ejercitar). El bloque del config viaja por el puente de features, que
+      lo valida (test del rango de max_symbol_weight).
+    verificado: "2026-10-12: tests/test_portfolio_optimizer_honesto.py; imports del optimizador en el arbol: solo el propio modulo."
+    siguiente_accion: "Cablearlo es una decision de riesgo del dueno, no un refactor: exige encargo, libreria declarada y tests del comportamiento. No se hace sin encargo."
 
   - id: ISS-008
     titulo: "El optimizador de cartera declara una propiedad que el codigo no tiene (codependence)"
@@ -244,11 +293,19 @@ issues:
       un nombre inventado.
     evidencia: ["config/gts.yaml:433", "grep codependence en risk/: cero coincidencias"]
     por_que_importa: "Una clave de configuracion que nadie lee es documentacion falsa."
-    pruebas_que_lo_fijan: "NINGUNA."
+    pruebas_que_lo_fijan: "La clave fluye hasta rp.HCPortfolio.optimization (risk/portfolio_optimizer.py:138)."
     fix_propuesto: "Borrar la clave o implementar el metodo que nombra."
     coste: trivial
     reversibilidad: trivial
-    siguiente_accion: "R-009 (misma tarea que ISS-007)"
+    estado: RESUELTO
+    resuelto_por: >
+      Obsoleta la premisa: el modulo LEE la clave y la pasa a riskfolio
+      (`self.config.codependence` llega a `port.optimization(...)`), y el
+      puente de features la valida desde app/features. La clave es real en
+      las dos capas que la tocaban. El optimizador sigue desconectado del
+      camino de decision (ver ISS-007).
+    verificado: "2026-10-12: risk/portfolio_optimizer.py:136-139; app/features.py:198."
+    siguiente_accion: "ninguna"
 
   # ═════════════════════════ MEDIA ═════════════════════════
   - id: ISS-009
@@ -279,7 +336,22 @@ issues:
     fix_propuesto: "Retirar las 5 citas y reescribir la justificacion con lo que SI esta medido (los tres p-valores, todos > 0.05), o generar el fichero. La segunda opcion no cambia el resultado, porque el barrido ya se hizo en H1 y fallo."
     coste: bajo
     reversibilidad: trivial
-    siguiente_accion: "R-010"
+    estado: RESUELTO
+    resuelto_por: >
+      2026-10-12: las citas a sweep-H4.json se retiraron de gts.yaml y del
+      README. La justificacion de la regla embarcada dice ahora la verdad
+      completa: es la regla de REFERENCIA del camino de reglas, no tiene
+      evidencia de ningun timeframe (la meseta H4 pertenecia al proyecto
+      anterior y su fichero nunca existio en este arbol), el unico barrido
+      en disco no sostiene nada (0/5, p=0.9935), el registro no confirma
+      ninguna regla y el bot no envia ordenes. Con la valla nueva
+      (test_la_configuracion_no_cita_ficheros_de_evidencia_inexistentes)
+      ninguna cita a data/research/*.json puede volver a apuntar al aire:
+      se comprueban TODAS las rutas citadas en config y README contra el
+      disco, y el conteo minimo es parte de la asercion para que la valla
+      no se quede sin nada que vigilar.
+    verificado: "2026-10-12: test_shipped_signal_source 7/7; 0 rutas data/research/*.json citadas que no existan."
+    siguiente_accion: "ninguna"
 
   - id: ISS-010
     titulo: "El walk-forward no reentrena por fold"
@@ -342,6 +414,7 @@ issues:
       porque no habia una puerta.
     evidencia:
       - "Test-Path .github -> False (medido hoy)"
+      - "git remote -v -> VACIO (medido 2026-10-12): el repositorio es local"
       - "pyproject.toml define las tres herramientas, sin runner"
       - "README memory-graph 2026-10-07: 'No ha acabado de correr el lint final post-sesion'"
     por_que_importa: >
@@ -352,7 +425,20 @@ issues:
     fix_propuesto: "Un workflow minimo: pytest (ambos suites) + ruff + mypy, en cada push."
     coste: bajo
     reversibilidad: trivial
-    siguiente_accion: "R-006"
+    estado: PARCIAL_POR_FALTA_DE_REMOTE
+    resuelto_por: >
+      No hay remote (git remote -v vacio, medido 2026-10-12): no existe
+      push que dispare nada, y un .github/workflows aqui seria decoracion
+      que aparenta una puerta que no esta. La puerta que SI puede existir es
+      la local: scripts/suite_completa.py ejecuta las DOS suites (bot y
+      panel) en una orden, reporta el CODIGO DE SALIDA de cada una - el
+      numero que dice si paso, no un recuento de lineas - y sale distinto
+      de cero si cualquiera esta en rojo. Avisa ademas de los dos entornos
+      que hacen falta (myenv y dashboard/.venv) antes de que el fallo
+      parezca de codigo. El dia que el repositorio gane remote, el workflow
+      es trivial: esa misma orden en un paso.
+    verificado: "2026-10-12: corrida completa por scripts/suite_completa.py, salida 0."
+    siguiente_accion: "Si el dueno publica el repositorio: mover la orden a .github/workflows tal cual."
 
   - id: ISS-013
     titulo: "La simulacion importa el modulo de ejecucion real a nivel de modulo"
@@ -368,6 +454,7 @@ issues:
       - "simulation/broker_book.py:66 importa live.execution"
       - "tests/test_no_order_path.py — la lista de prohibidos no lo incluye"
       - "audit/PHASE1-REPORT.md D5 lo identifica"
+      - "Re-verificado 2026-10-12: el import YA NO EXISTE; solo queda una mencion de FlattenReport en un docstring, que no es un import"
     por_que_importa: >
       La garantia 'solo el modulo live envia ordenes' descansa en una lista escrita a
       mano, no en la estructura del grafo. Un modulo nuevo que importe live pasaria
@@ -376,7 +463,17 @@ issues:
     fix_propuesto: "Anadir live.execution a la lista, o invertir el test: que enumere los que SI pueden y niegue el resto."
     coste: trivial
     reversibilidad: trivial
-    siguiente_accion: "R-012"
+    estado: RESUELTO
+    resuelto_por: >
+      El import murio con la reestructuracion de la etapa (la fila de
+      simulation/broker_book.py ya no contiene `import live.execution`;
+      grep 2026-10-12: solo queda la referencia de un docstring a
+      FlattenReport). La segunda mitad del hallazgo - que la valla era una
+      lista escrita a mano - sigue siendo verdad y el dia que alguien
+      anada un modulo de envio nuevo, la lista tiene que crecer con el:
+      el fix_propuesto de invertir la valla sigue siendo la forma buena.
+    verificado: "2026-10-12: grep 'import live' en simulation/ -> 0 nodos de import."
+    siguiente_accion: "ninguna"
 
   - id: ISS-014
     titulo: "El optimizador de cartera no tiene pruebas y el unico guardián de confirmacion tampoco es completo"
@@ -488,11 +585,26 @@ issues:
       Un README que declara cerrado lo que esta abierto (y al reves) hace que
       cualquiera que llegue tarde tome la decision equivocada. El README tiene las dos
       afirmaciones sobre la misma correccion, en secciones distintas.
-    pruebas_que_lo_fijan: "tests/test_reality_check.py (33), tests/test_cost_conformity.py"
+    pruebas_que_lo_fijan: "tests/test_reality_check.py (41), tests/test_cost_conformity.py (2, ahora ejerciendo el motor)"
     fix_propuesto: "Reescribir las secciones de 'Huecos de validez' del README contra el estado medido. Este mapa (COMPONENTS.yaml) es la referencia; el README deberia ser el indice legible."
     coste: bajo
     reversibilidad: trivial
-    siguiente_accion: "R-010 (misma tarea que ISS-009)"
+    estado: RESUELTO
+    resuelto_por: >
+      2026-10-12: la seccion de huecos del README queda sincronizada con el
+      estado medido. no-multiple-testing-correction ya decia "CERRADO para el
+      barrido, abierto para el fuera de muestra" y se conserva asi. La
+      entrada de costes se reescribio: el modelo unificado existe, ambos
+      motores lo importan, y el criterio de aceptacion (test_cost_conformity)
+      ejerce desde hoy el MOTOR de backtest y no una cuenta a mano (ver
+      ISS-005); los numeros del parrafo antiguo quedan marcados como historia
+      del backtest sin costes de la epoca, no como descripcion del actual.
+      Ademas se retiro la cita muerta de sweep-H4.json de la seccion de
+      evidencias del Reality Check y se apunto al barrido real, que SI
+      lleva serie y p (ISS-009). La seccion lookback-mismatch se marco
+      RESUELTA con su test.
+    verificado: "2026-10-12: 0 rutas data/research/*.json citadas en README que no existan (valla de ISS-009)."
+    siguiente_accion: "ninguna"
 
   - id: ISS-019
     titulo: "El stack web no esta documentado donde lo buscara quien llegue"
@@ -553,7 +665,17 @@ issues:
     fix_propuesto: "Documentar el grafo real en vez de prometer un arbol. Este mapa lo hace; falta corregir el docstring."
     coste: trivial
     reversibilidad: trivial
-    siguiente_accion: "R-017"
+    estado: RESUELTO
+    resuelto_por: >
+      El ciclo murio con la extraccion de decisions/: runtime/loop.py ya no
+      importa app.decision_core sino decisions.decide (grep 2026-10-12:
+      runtime/ no contiene ningun `from app`). El docstring de app/main.py
+      se actualizo para describir el grafo REAL, incluyendo la capa
+      `decisions` y el hecho de que runtime no conoce app - con la
+      historia del ciclo en una linea, para que nadie lo reintroduzca sin
+      saber que existio.
+    verificado: "2026-10-12: `Select-String runtime\loop.py 'from app'` -> 0; decisions/decide.py solo importa core."
+    siguiente_accion: "ninguna"
 
   - id: ISS-022
     titulo: "El panel muestra el riesgo que ya calcula y no lo pinta"
@@ -657,6 +779,112 @@ issues:
     siguiente_accion: "ninguna"
     detectado_en: "2026-10-11, SHADOW y polling contra MT5 real con el mercado recien abierto"
 
+  # ═════════════════════════ NUEVOS DE LA ETAPA ESTRUCTURAL (12-10) ═════════════════════════
+  - id: ISS-036
+    titulo: "El --resume del entrenamiento reentrenaba la epoca ya hecha"
+    severidad: media
+    confirma: si
+    componente: [ML-002]
+    tipo: defecto_confirmado
+    resumen: >
+      El checkpoint guarda el indice 0-based de la epoca ACABADA, y el bucle
+      arrancaba `range(start_epoch, epochs)` sobre ese mismo indice: reanudar
+      repetia la ultima epoca guardada. Cada reanudacion tiraba una epoca de
+      presupuesto junto con su estado de optimizer/scheduler ya consumido.
+      Documentado por tests/test_reanudacion_entrenamiento.py (9), que fijaban
+      el comportamiento REAL a proposito, con el veredicto invertido para
+      cuando se arreglara.
+    evidencia:
+      - "research/backtest_v2.py: start_epoch = state.get('epoch', 0) y range(start_epoch, ...)"
+      - "Los dos tests del archivo decian literalmente: 'fija el comportamiento REAL, para que cuando se arreglie se vea que se ha arreglado'"
+    fix_aplicado: >
+      `start_epoch = completada + 1`, con `-1` de origen para que un
+      checkpoint sin clave de epoca siga arrancando en la 0. Y el
+      `best_epoch` inicial ya no es `start_epoch` - que tras el arreglo
+      seria "la epoca que aun no ha corrido" - sino el mejor del propio
+      checkpoint (model.best_epoch), porque si la sesion reanudada nunca
+      mejora, el mejor de verdad sigue siendo el del checkpoint y el
+      informe de cierre no puede decir otra cosa.
+    verificado: >
+      2026-10-12: los dos tests se invirtieron al comportamiento correcto
+      (reanudar desde epoca 0 entrena 1,2; desde epoch_2 entrena 3 y no
+      2); la reanudacion del horizonte pasado reporta el recuento real de
+      epocas hechas; 9/9 del archivo en verde.
+    coste: bajo
+    reversibilidad: trivial
+    estado: RESUELTO
+    siguiente_accion: "ninguna"
+    detectado_en: "2026-10-12, entrenamiento interrumpido a las 2/40 epocas (job entrenamiento-1p-40e)"
+
+  - id: ISS-037
+    titulo: "La puerta de lectura de CSVs perdia un ulp por valor al releer"
+    severidad: alta
+    confirma: si
+    componente: [RES-002, QA-001]
+    tipo: defecto_confirmado
+    resumen: >
+      `pd.read_csv` con el parser por defecto relee UN ULPIESMO por debajo
+      de algunos doubles largos escritos con repr. Medido sobre el
+      EURUSD_H1.csv recien descargado: 25.650 de ~500.000 valores cambiaban
+      un ulp - la cadena `1.2794699999999999` volvia como `1.27947`, que es
+      OTRO double - y con ellos el `data_hash` del fichero dejaba de
+      cuadrar aunque el fichero fuera exactamente el descargado. El
+      proyecto ya sabia que "el relector de siempre no es exactamente
+      redondo -una ulp-" y lo esquivaba escribiendo %.17g en los pines; el
+      lector principal seguia siendo no exacto.
+    evidencia:
+      - "test_puerta_de_csv.py::test_el_hash_declarado_corresponde_a_sus_velas[EURUSD_H1.csv] FALLO con el hash declarado d7b83d3e... y el calculado 11274bb4..."
+      - "float_precision='round_trip' reproduce el hash declarado exactamente; 25.650 valores difieren entre ambos parseos"
+      - "XAUUSD M15/M30: 0 valores difieren (el caso solo explota con reprs largos, tipicos de precios cercanos a 1.0)"
+    fix_aplicado: >
+      `research/io.read_frame` lee con `float_precision="round_trip"`. Por
+      esa puerta pasan el hash, el replay y toda medicion: leer el precio
+      exacto que fue escrito es lo que hace que dos corridas del mismo
+      fichero sean la misma corrida. La valla nueva
+      (test_un_double_escrito_se_relee_exacto) usa cuatro de los valores
+      reales que fallaban, leidos del fichero: son el caso comprobado, no
+      uno construido.
+    verificado: >
+      2026-10-12: el test del hash pasa para los tres CSV; la valla nueva
+      verde; verificado que fallaria si alguien quita el round_trip.
+    coste: trivial
+    reversibilidad: trivial
+    estado: RESUELTO
+    siguiente_accion: "ninguna"
+    detectado_en: "2026-10-12, la corrida de la suite tras la descarga de historia de la Fase 1"
+
+  - id: ISS-038
+    titulo: "La inferencia del panel fijaba un lookback distinto del entrenamiento"
+    severidad: media
+    confirma: si
+    componente: [INF-002]
+    tipo: defecto_confirmado
+    resumen: >
+      `dashboard/app/inference.py` ponia `lookback_bars: int = 200` como
+      valor por defecto mientras la ultima corrida de entrenamiento uso
+      lookback 100. La ventana que se le daba al modelo en inferencia era
+      el doble de larga que aquella para la que sus pesos aprendieron, y la
+      senal salia mal en la entrada sin que ningun log lo dijera.
+      Documentado como bug `lookback-mismatch` en el README.
+    evidencia:
+      - "dashboard/app/inference.py:57 lookback_bars: int = 200"
+      - "job-20261012-064349-936caa config: lookback 100"
+    fix_aplicado: >
+      `load_model` lee `training_provenance.lookback_bars` del propio
+      checkpoint (la procedencia que el entrenador escribe dentro) y corrige
+      el valor configurado, con warning. Un checkpoint viejo sin procedencia
+      conserva el configurado y el warning declara que es un supuesto, no
+      una medida.
+    verificado: >
+      2026-10-12: dashboard/tests/test_inferencia_lookback.py 3/3
+      (corrige, conserva sin procedencia, no toca si coincide). La entrada
+      del README se marco RESUELTA con su test.
+    coste: trivial
+    reversibilidad: trivial
+    estado: RESUELTO
+    siguiente_accion: "ninguna"
+    detectado_en: "Revision de los bugs abiertos del README durante la etapa estructural"
+
   - id: ISS-024
     titulo: "El filtro de niveles del visor de logs no funciona en los logs del bot"
     severidad: baja
@@ -726,11 +954,26 @@ issues:
     por_que_importa: >
       Es la unica excepcion real a D-017, y es la clase de defecto que D-017 existe
       para evitar: el panel tocando codigo del bot sin poder importarlo.
-    pruebas_que_lo_fijan: "NINGUNA. Los 411 tests del panel pasan porque ningun test llama a /api/learning/*."
+    pruebas_que_lo_fijan: "dashboard/tests/test_learning_sin_boton.py (4 tests: 404 honesto sin artefacto, reader del artefacto del bot, 501 con motivo, valla AST del import)."
     fix_propuesto: "Decidir si el aprendizaje entra en el panel (y entonces hacer un espejo, como control_channel) o si sale de su alcance (y los endpoints devuelven 501 con un motivo)."
     coste: bajo
     reversibilidad: trivial
-    siguiente_accion: "R-017"
+    estado: RESUELTO
+    resuelto_por: >
+      2026-10-12, por la segunda via: el aprendizaje SALE del alcance del
+      panel. GET /api/learning/report lee data/learning/report.json - el
+      artefacto que escribe el bot cuando corre SU LearningLoop - y sin
+      artefacto responde 404 con el motivo (quien lo escribe, donde va a
+      aparecer). POST /api/learning/run se retira con 501 y el motivo:
+      ejecutar el analisis del bot desde el proceso del panel es la
+      excepcion exacta a D-017, y el camino - si algun dia hace falta
+      arrancarlo desde la interfaz - es un trabajo de la cola del bot. La
+      valla AST impide que el import vuelva: mira los NODOS de importacion
+      de dashboard/app/main.py y no el texto, porque la primera version
+      del test se disparo a si misma con el docstring que explica el
+      problema.
+    verificado: "2026-10-12: dashboard/tests/test_learning_sin_boton.py 4/4."
+    siguiente_accion: "ninguna"
     detectado_en: "Propuesta arquitectonica 2026-10-10"
 
   - id: ISS-029
@@ -749,6 +992,7 @@ issues:
       - "runtime/loop.py:1064 TradingLoop._act (lineas 1064-1120), docstring: 'kept for test compatibility'"
       - "Analisis AST: 11 de 12 sentencias identicas en la misma posicion"
       - "Su unico miembro de portfolio es self.portfolios (plural), que ningun guardian filtra"
+      - "Re-verificado 2026-10-12: `def _act` NO EXISTE YA en runtime/loop.py (grep: 0 definiciones)"
     por_que_importa: >
       Es la logica que EJECUTA una operacion, duplicada y muerta. Un programador
       que lea la primera creera que es la que corre, y la modificara creyendo que
@@ -758,7 +1002,17 @@ issues:
     fix_propuesto: "Borrar las lineas 916-981 DESPUES de extraer el caso de uso ManagePosition. Antes de borrar, comprobar la suite en verde con la primera intacta."
     coste: trivial
     reversibilidad: trivial
-    siguiente_accion: "Fase 3 de la propuesta arquitectonica"
+    estado: RESUELTO
+    resuelto_por: >
+      Las DOS definiciones murieron con la extraccion de casos de uso de la
+      etapa: la ejecucion de una operacion vive en
+      core/usecases/manage_position.py y core/usecases/process_bar.py, que
+      runtime/loop.py importa y pasa como colaboradores, y el bucle ya no
+      define ningun _act propio (grep 2026-10-12). La Forma 3 de la
+      propuesta - extraer el caso de uso y borrar el duplicado - es
+      exactamente lo que se hizo.
+    verificado: "2026-10-12: grep 'def _act' en runtime/loop.py -> 0; runtime/loop.py importa ManagePosition y ProcessBar de core/usecases."
+    siguiente_accion: "ninguna"
     detectado_en: "Propuesta arquitectonica 2026-10-10"
 
   # ═════════════════════════ VIGILADOS, SIN ACCION ═════════════════════════

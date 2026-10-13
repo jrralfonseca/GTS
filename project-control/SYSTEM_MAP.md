@@ -106,11 +106,16 @@ Tener un checkpoint no es tener una ventaja, y el código lo aplica.
 
 | # | Lo que dice la documentación | Lo que mide el código |
 |---|---|---|
-| D1 | `app/main.py:36-44`: *"the dependency graph is a tree"* | 8 aristas del bot hacia `research/` (el instrumento) |
-| D2 | `runtime/loop.py:49` importa `app.decision_core` | **Ciclo duro `app` ↔ `runtime`**, contradice *"app wires them"* |
-| D3 | README D-017: *"the panel does not import the bot"* | **Verificado en el sentido fuerte: 0 aristas de `dashboard/app/*` hacia `app.*`.** Las entradas reales al bot son `core.*`, `strategies`, `research.*` |
-| D4 | `tests/test_no_order_path.py`: *"la simulación no alcanza el broker"* | `simulation/broker_book.py:66` importa `live.execution` a nivel de módulo |
-| D5 | `config/gts.yaml:186` cita `data/research/sweep-H4.json` como evidencia de `EMA_Trend_Pullback` | **El fichero no existe.** Citado también en README:433, 442, 609, 642 |
+| D1 | `app/main.py:36-44`: *"the dependency graph is a tree"* | RESUELTO el 2026-10-12: el ciclo D2 murió con la extracción de `decisions/`, y el docstring describe ahora el árbol real (runtime no conoce app). Las 8 aristas del bot hacia `research/` siguen existiendo: son el instrumento, toleradas y contadas |
+| D2 | ~~`runtime/loop.py:49` importa `app.decision_core`~~ | RESUELTO: `runtime/loop.py` importa `decisions.decide` (que solo conoce `core`). Verificado por grep el 2026-10-12: cero `from app` en runtime/ |
+| D3 | README D-017: *"the panel does not import the bot"* | **Verificado en el sentido fuerte: 0 aristas de `dashboard/app/*` hacia `app.*`.** Las entradas reales al bot son `core.*`, `strategies`, `research.*`. Reforzado el 2026-10-12: los endpoints `/api/learning` que importaban `app.learning` (un 500 permanente, ISS-028) se retiraron con 404/501 honestos y valla AST |
+| D4 | `tests/test_no_order_path.py`: *"la simulación no alcanza el broker"* | RESUELTO: el import de `live.execution` en `simulation/broker_book.py` murió con la reestructuración (verificado 2026-10-12; solo queda una mención en un docstring) |
+| D5 | ~~`config/gts.yaml:186` cita `data/research/sweep-H4.json`~~ | RESUELTO el 2026-10-12: las cinco citas muertas se retiraron, la justificación dice la verdad (regla de referencia sin evidencia) y una valla impide citar cualquier `data/research/*.json` que no exista |
+
+**El 2026-10-12 las cinco divergencias de esta tabla están resueltas.** La
+tabla se conserva porque su formato —documentación contra medición— sigue
+siendo el de esta sección: la próxima divergencia nueva entra aquí con su
+medida.
 
 D3 se ha **corregido** respecto a la auditoría anterior del 2026-10-09: la
 premisa de que el panel alcanzaba `app.*` era un falso positivo de resolución de
