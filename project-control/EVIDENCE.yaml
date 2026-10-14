@@ -7,12 +7,13 @@
 # QUE NO ES: un informe. Los informes se archivan; esto se re-genera.
 
 meta:
-  fecha: "2026-10-12"
-  commit: "etapa estructural, tras 5bb0644"
+  fecha: "2026-10-14"
+  commit: "bce3e59 — revision completa, y el trabajo de project-control de esta sesion sin commitear"
   maquina: Windows · Python 3.12 (myenv) · Python 3.12 (dashboard/.venv)
-  regla_basetemp: "SIEMPRE fuera del arbol del repo Y en un directorio fresco: el basetemp por defecto de pytest (%TEMP%\\pytest-of-<usuario>) quedo bloqueado en esta maquina (WinError 5) y enveneno una corrida entera con 359+ errores de setup que se leian como rojo de codigo. scripts/suite_completa.py pasa --basetemp a un mkdtemp propio."
-  commits_desde_la_auditoria_anterior: ["44f8591", "e801d4e", "ffbe39f", "c0f35c7", "9efed97", "5bb0644"]
+  regla_basetemp: "SIEMPRE fuera del arbol del repo Y en un directorio fresco: el basetemp por defecto de pytest (%TEMP%\\pytest-of-<usuario>) quedo bloqueado en esta maquina (WinError 5) y enveneno una corrida entera con 359+ errores de setup que se leian como rojo de codigo. scripts/suite_completa.py pasa --basetemp a un mkdtemp propio. En la sesion del 2026-10-14 se uso %TEMP%\\opencode\\pytest_pc."
+  commits_desde_la_auditoria_anterior: ["44f8591", "e801d4e", "ffbe39f", "c0f35c7", "9efed97", "5bb0644", "f33eae1", "bce3e59"]
   auditoria_anterior: "audit/ (borrada del arbol, recuperable en HEAD) · 2026-10-09 · base 32b6f8e"
+  recuento_del_mapa: "COMPONENTS 62 componentes · ISSUES 49 · ROADMAP 27 tareas · EVIDENCE 5 suites + sesion_2026_10_14 (medido 2026-10-14 con yaml.safe_load sobre los cuatro)"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SUITES DE TESTS — el denominador de todo lo demas
@@ -31,9 +32,9 @@ suites:
       VERDE en ambas, certificacion de la etapa estructural: bot 1648
       coleccionados / 1594 pasan / 54 saltos con motivo / exit 0; panel
       500/500 / 0 saltos / exit 0. La corrida valida el arbol con los
-      arreglos de la etapa: --resume sin off-by-one (ISS-036), lector
-      round_trip (ISS-037), /api/learning honesto (ISS-028), lookback de
-      la procedencia (ISS-038), conformidad de costes ejerciendo el motor
+      arreglos de la etapa: --resume sin off-by-one (ISS-047), lector
+      round_trip (ISS-048), /api/learning honesto (ISS-028), lookback de
+      la procedencia (ISS-049), conformidad de costes ejerciendo el motor
       (ISS-005), 11 guardianes revividos (ISS-006) y los cuatro lectores
       de precios enrutados por la puerta. Los 54 saltos (54, no 79 como
       el 2026-10-11: los guardianes revividos corren) declaran su motivo
@@ -64,7 +65,7 @@ suites:
     exit_code: 0
     duracion: "9-10 min"
     conclusion: >
-      VERDE, re-corrida tras el fix del reloj del broker (ISS-035). Entrada
+      VERDE, re-corrida tras el fix del reloj del broker (ISS-046). Entrada
       historica: superada por la corrida del 2026-10-12 (bot_y_panel_completos).
     saltos:
       total: 79
@@ -294,7 +295,7 @@ operacion:
     scripts/shadow_mt5.py contra el terminal real, 2026-10-11: 26/26
     comprobaciones OK, exit 0 (con el mercado cerrado). Cuenta 10012953169
     @ MetaQuotes-Demo (demo=True). 600 barras H1 de EURUSD validadas.
-    Con el mercado ABIERTO: 25/26 OK (fallo ATR disponible por ISS-035,
+    Con el mercado ABIERTO: 25/26 OK (fallo ATR disponible por ISS-046,
     corregido).
   polling_en_vivo: >
     scripts/polling_mt5.py --temporalidad M5 --espera 420, contra el
@@ -314,20 +315,192 @@ operacion:
 # ═══════════════════════════════════════════════════════════════════════════
 git:
   rama: master
-  head: "sin commitear (ISS-035)"
-  fecha_head: "2026-10-11 (en curso)"
-  ficheros_sin_comitear: "4 lineas: 2 D architecture/gts-architecture.{html,json}, 2 sin rastrear project-control/*.md"
+  head: "bce3e59 — 'feat: Monitoring/Alerting stack + Live Trading path complete'"
+  fecha_head: "2026-10-14 02:17 -0400"
+  ficheros_sin_comitear: "project-control/ (este fichero de trabajo). Nada de codigo."
   eliminaciones_preparadas: 0
+  calidad_del_ultimo_commit:
+    veredicto: "MEZCLA. El trabajo real esta; el commit tambien se llevo 176 ficheros que no son codigo."
+    medidas:
+      - "236 ficheros, +19.325 / -123"
+      - "Codigo real del commit: 13 modulos nuevos + RUNBOOK_LIVE.md + docker/grafana/prometheus/alertmanager"
+      - "Basura: ~171 artefactos de tmp_pytest*/, data/tests/ y _otra_forma0/"
+      - "Basura: 4 logs de la raiz (panel-prueba.log, server.log, sweep_XAUUSD_M15.{log,err})"
+      - "Basura: 3 scripts de prueba de la raiz (testmt5.py, test_pnl.py, test_server.py)"
+    causa: "git add -A sin revisar; el .gitignore se modifico en el MISMO commit, despues de anadir"
+    ver: [ISS-050, R-021]
   nota: >
     Las 220 eliminaciones de audit/ de la revision anterior se resolvieron en
     commits, y brokers/exness.yaml esta restaurado y versionado (verificado
     2026-10-11 con git ls-files). El aviso de no-ejecutar-checkout queda obsoleto.
   .gitignore_cubre: ["/data/* (con excepciones)", "/gts/", "descarga/", "dashboard/.env", "colab/gts_colab_bundle.zip", "/kaggle/data/"]
+  .gitignore_no_cubre: "tmp_pytest*/, los *.log de la raiz, y los scripts de prueba sueltos de la raiz — los tres entraron en bce3e59"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MEDICIONES DEL 2026-10-14 — commit bce3e59, con su nota de alcance
+#
+# ATENCION AL ALCANCE: casi todo lo de esta seccion se MIDIO DE VERDAD, y a
+# la vez casi todo NO es lo que el nombre de la pieza sugiere. El servidor de
+# modelo responde; el bot no lo consume. El canal de alertas envia; el bot no
+# puede llamarlo. Un numero sin su alcance no es evidencia, es decoracion.
+# ═══════════════════════════════════════════════════════════════════════════
+sesion_2026_10_14:
+
+  alcance: >
+    Revision completa del commit bce3e59 con lectura de codigo y ejecucion en
+    la maquina. Lo que se MIDIO esta aqui con su comando; lo que se LIO y esta
+    roto esta en ISSUES.yaml (ISS-046 a ISS-055); la lectura completa esta en
+    INFORME_LIVE_Y_MONITORING.md.
+
+  suites_del_bloque_nuevo:
+    comando: 'myenv\Scripts\python.exe -m pytest tests/test_cableado_demo.py tests/test_label_barriers.py tests/test_regime_gate.py tests/test_train_pipeline_wiring.py tests/test_adaptive_rules.py tests/test_asset_id_resolution.py tests/test_asset_index.py -q --basetemp=%TEMP%\opencode\pytest_pc'
+    fecha: "2026-10-14"
+    passed: 126
+    failed: 0
+    exit_code: 0
+    conclusion: >
+      VERDE en los siete ficheros del bloque. NO es la puerta completa
+      (scripts/suite_completa.py, que es la que certifica) y no se ha corrido
+      aqui: la puerta arrastra las 2148 pruebas yminutes de mas. Lo que si
+      importa de esta corrida es el aviso que sale en ella.
+    aviso_que_importa: >
+      RuntimeWarning: coroutine 'AlertManager.alert' was never awaited
+      (tests/test_cableado_demo.py::test_demo_con_puerto_si_envia_por_este_puerto)
+      El bot intenta emitir una alerta, la corrutina no llega a ejecutarse, y
+      Python lo dice en voz alta. Es la prueba de que el cableado de alertas
+      esta roto, y de que la suite lo ve sin que nadie lo mire. Ver ISS-046.
+
+  cobertura_del_trabajo_nuevo:
+    metodo: "grep sobre tests/*.py y dashboard/tests/*.py, 2026-10-14"
+    resultado: "13 modulos, 0 referencias: entry_filter, ml_integration, regime_integration, strategy_performance, pnl_labeling, walkforward_v2, model_server, export_onnx, scripts.alerts, scripts.flatten, scripts.go_live, preflight_live, reconcile_session"
+    veredicto: "CERO. Los dos unicos ficheros que los tocan (test_pnl.py, test_server.py) no son tests: sin def test_, sin assert"
+    ver: [ISS-048]
+
+  preflight_demo:
+    comando: 'myenv\Scripts\python.exe -m scripts.preflight_live --config config/gts.yaml'
+    fecha: "2026-10-14"
+    exit_code: 0
+    resultado:
+      - "MT5 build 6259, terminal conectado, trade_allowed=True"
+      - "Cuenta 10012953169 @ MetaQuotes-Demo, margen libre 10.000 USD"
+      - "XAUUSD disponible, spread dentro de limite"
+      - "Cero posiciones abiertas, cero ordenes pendientes"
+      - "data/journal, data/control y logs escribibles"
+    conclusion: "PASS. Las ocho comprobaciones, en DEMO. Perfil LIVE: NO EJECUTADO, por decision del dueno."
+    ver: [OPS-004, LIVE-001]
+
+  bot_desde_el_panel:
+    comandos:
+      - 'POST localhost:8000/api/bot/launch -> {"pid": 16932, "dry_run": true}'
+      - 'GET localhost:8000/api/bot/status -> running, paused, seq 1..6'
+      - 'POST localhost:8000/api/bot/start -> {"requested": "resume", "seq": 7}'
+      - 'GET localhost:8000/api/bot/status -> {"running": true, "paused": false, "state": "ready", "control_seq": 7, "dry_run": true}'
+      - 'GET localhost:8000/health -> {"status": "healthy", "panel": "gts", "mt5_connected": true, "mt5_latency_ms": 0.6, "bot_running": true, "bot_pid": 13172, "bot_heartbeat": "2026-10-14T06:51:01+00:00", "disk_critical": false, "journal_writable": true}'
+    fecha: "2026-10-14"
+    conclusion: >
+      El panel lanza, pausa, reanuda y aplana el bot, y el bot responde. El
+      latido sube. A las 02:51 el /health del panel responde 'healthy' con el
+      bot en marcha (pid 13172), MT5 conectado a 0,6 ms, 579 GB libres y el
+      diario escribible. Con --dry-run permanente (LAUNCH_ARGS lo lleva
+      dentro): dry_run=true, puede_enviar=false, profile=research.
+    alcance: "Bot real contra MT5 real, en modo simulacion. CERO operaciones de mercado: el puerto no se ha ejercitado nunca con una orden."
+
+  fuente_de_senal:
+    comandos:
+      - 'POST localhost:8000/api/signal/source {"source": "model", "reason": "test switch to model"} -> 200'
+      - 'GET localhost:8000/api/signal/source -> {"pending": {"source": "model", "requested_by": "panel"}, "available": ["rules", "model"]}'
+    fecha: "2026-10-14"
+    conclusion: >
+      El selector del panel cambia la fuente de punta a punta y escribe
+      data/control/signal_source.json con requested_by: panel. El motivo debe
+      tener 20 caracteres o mas: el backend lo rechaza con
+      'reason too short (11 chars, minimum 20)'.
+    apunte: "No hay fusion rules+model: app/signal.py::resolve() devuelve UNA. Ver D-035."
+
+  servidor_de_modelo:
+    comandos:
+      - 'POST localhost:8080/predict -> 200 OK'
+      - 'GET localhost:8080/metrics -> texto de Prometheus'
+    fecha: "2026-10-14"
+    latencia: "~21 ms"
+    conclusion: "Sirve, y expone nueve metricas. ALCANCE: el bot no lo consume (ver ISS-055), y hoy el puerto 8080 no escucha."
+    ver: [SER-001, ISS-055]
+
+  alertas_telegram:
+    comandos:
+      - 'myenv\Scripts\python.exe -m scripts.alerts --config config/gts.yaml --test'
+    fecha: "2026-10-14"
+    resultado: "Entregado en el grupo -5504195034 ('GTS Signals')"
+    conclusion: >
+      EL CANAL FUNCIONA. EL CABLEADO NO: desde el bot no puede salir ninguna
+      alerta, por las dos capas de ISS-046. Y el token esta en claro en dos
+      ficheros versionados (ISS-047).
+    ver: [OBS-004, ISS-046, ISS-047]
+
+  pila_de_observabilidad:
+    metodo: "Test-NetConnection localhost -Port <p> (2026-10-14)"
+    resultado: "8000 True · 8080 False · 9090 True · 9093 True · 3000 True"
+    conclusion: >
+      Panel, Prometheus, Grafana y Alertmanager responden. El servidor de
+      modelo esta apagado, y por eso Prometheus lo marca down con razon.
+      El trabajo 'gts-trading-loop' que raspa :9090 no puede estar bien: el
+      bot no expone /metrics (ISS-052).
+    ver: [OBS-005]
+
+  higiene_del_repositorio:
+    metodo: "git show --stat bce3e59 --name-only ; git ls-files (2026-10-14)"
+    resultado: "236 ficheros en el commit; ~171 son artefactos de tmp_pytest*/, data/tests/ y _otra_forma0/. 176 ficheros de basura en el indice."
+    conclusion: >
+      El commit se hizo con git add -A. El .gitignore se modifico en el MISMO
+      commit, despues de anadir. Codigo real del commit: alrededor de una
+      cuarta parte de lo que el diff sugiere.
+    ver: [ISS-050]
+
+  yaml_del_mapa:
+    metodo: 'yaml.safe_load sobre los cuatro ficheros de project-control (2026-10-14)'
+    resultado: "COMPONENTS 62 · ISSUES 48 · ROADMAP 27 · EVIDENCE 5"
+    incidente_resuelto:
+      sintoma: "ISSUES.yaml NO parseaba: ScannerError en la linea 677, 'found unknown escape character l'."
+      causa: 'Una ruta de Windows dentro de un escalar de comillas dobles: runtime\loop.py. \l no es un escape valido en YAML.'
+      por_que_dormia: >
+        Nadie parsea estos ficheros: git grep solo encuentra referencias desde
+        cuatro .md. Son un inventario legible, no una base de datos — pero
+        entonces el formato YAML solo da laVersion de lo que podria ser
+        verificado.
+      fix: "Comillas simples en la linea 677. Ahora los cuatro parsean."
+      nota: >
+        El defecto era ANTERIOR a esta sesion (verificado contra
+        bce3e59^). Lo que se ha hecho es documentarlo (ISS-056) y
+        arreglarlo, no heredarlo.
 
 # ═══════════════════════════════════════════════════════════════════════════
 # LO QUE NO SE HA MEDIDO — con el motivo
 # ═══════════════════════════════════════════════════════════════════════════
 no_medido:
+  - que: "Que salga UNA alerta desde el bot"
+    motivo: >
+      No puede salir. Dos capas rotas (ISS-046): el RuntimeConfig no lleva la
+      configuracion, y los manejadores hacen asyncio.create_task() desde el
+      bucle sincrono. La suite lo avisa con 'coroutine AlertManager.alert was
+      never awaited'.
+    que_habria_que_hacer: "R-017, y despues un test que lo afirme."
+  - que: "UN fold de walkforward_v2 y UN epoch de PnLTrainingConfig"
+    motivo: >
+      No pueden ejecutarse: defaultdict sin importar en pnl_labeling (:563,
+      :609) y tres variables sin definir en _progress_cb de walkforward_v2
+      (:273, :277, :279). Los tres pilares no se han ejecutado nunca.
+    que_habria_que_hacer: "R-019 (tests de importacion) y luego R-020."
+  - que: "Que el servidor de modelo alimente al bot"
+    motivo: >
+      Formatos distintos: el servidor carga un .pt o un .onnx; el bot carga un
+      .json de ModelStrategy, y no hay ninguno en disco. No es un defecto de
+      cableado: es una decision de arquitectura que nadie ha tomado (ISS-055).
+    que_habria_que_hacer: "R-026. Es decision del dueno, no codigo."
+  - que: "Que las alertas salgan tras reiniciar el bot"
+    motivo: >
+      La deduplicacion (300 s) y el limite (50/hora) viven SOLO EN MEMORIA.
+      No se ha medido que sobrevivan a un reinicio porque no lo sobreviven.
+    que_habria_que_hacer: "Persistir el estado, o declarar que la deduplicacion es de proceso."
   - que: "Polling en vivo: una barra H1 nueva cerrada entregada a su hora por MT5"
     motivo: "Mercado cerrado el dia de la verificacion de conexion; sin barra nueva no hay nada que contar"
     que_habria_que_hacer: >

@@ -119,7 +119,7 @@ componentes:
       - "p del Reality Check sobre el universo, no el |t| del ganador aislado"
       - "Paralelo == serie bit a bit"
     tests: ["tests/test_reality_check.py (33)", "tests/test_sweep_parallel.py (11)", "tests/test_sweep_universe.py (19)"]
-    resultados_tests: "3 de los 11 de sweep_parallel fallan en suite completa (ver ISS-01); pasan 11/11 aislados. Los 33 de reality_check verdes."
+    resultados_tests: "3 de los 11 de sweep_parallel fallan en suite completa (ver ISS-001); pasan 11/11 aislados. Los 33 de reality_check verdes."
     evidencias:
       - "barrido-AUDUSD-H1-entrenar-1.json: p=0.6988, n_trials=25, n_boot=10000"
       - "barrido-AUDUSD-H1-entrenar-2.json: p=0.9980, n_trials=25"
@@ -308,7 +308,7 @@ componentes:
       - "La atencion cross-asset existe pero recibe ceros"
       - "20 features para 3.9M parametros es una relacion que ningun barrido de regularizacion rescata solo"
     bloqueos: []
-    siguiente_accion: "Ninguna hasta resolver ISS-02 (tramo fuera de muestra)."
+    siguiente_accion: "Ninguna hasta resolver ISS-002 (tramo fuera de muestra)."
     ultima_revision: "2026-10-10"
 
   - id: ML-002
@@ -338,7 +338,7 @@ componentes:
       - "Experimento 'more-training-makes-it-worse': status refuted"
     deficiencias:
       - "El sistema NO puede decidir si la cabeza de volatilidad sirve: el experimento vol-head-product esta bloqueado por falta de tramo reservado (README:879)"
-    bloqueos: [ISS-02]
+    bloqueos: [ISS-002]
     siguiente_accion: "Ninguna hasta que exista un tramo fuera de muestra. Sin ese tramo la pregunta no tiene respuesta valida."
     ultima_revision: "2026-10-10"
 
@@ -358,13 +358,13 @@ componentes:
       - "BUNDLE_VERSION.txt declara el commit de origen"
     criterios_aceptacion: ["El bundle ejecuta el notebook sin intervencion manual"]
     tests: ["tests/test_colab_bundle.py", "tests/test_kaggle_layout.py"]
-    resultados_tests: "verde, pero CONTAMINA la suite (ver ISS-01)"
+    resultados_tests: "verde, pero CONTAMINA la suite (ver ISS-001)"
     evidencias: ["gts/BUNDLE_VERSION.txt = 'commit 44f8591'", "13 ficheros del bundle divergen de la raiz (medido hoy)"]
     deficiencias:
       - "El bundle en gts/ esta 6h24m por detras de la raiz (09:31 vs 15:55 del 2026-10-10)"
       - "Es la causa raiz de los 3 tests que fallan"
     bloqueos: []
-    siguiente_accion: "Ver ISS-01. Es la tarea mas barata de la lista con mas superficie."
+    siguiente_accion: "Ver ISS-001. Es la tarea mas barata de la lista con mas superficie."
     ultima_revision: "2026-10-10"
 
   # ───────────────────── DOMINIO 6: Construccion de portafolio ─────────────────────
@@ -540,8 +540,8 @@ componentes:
     deficiencias:
       - "NO REENTRENA POR FOLD: el checkpoint se carga una vez y se evalua sobre la serie entera (bug walk-forward-not-retrained, sigue abierto)"
       - "El epoch del checkpoint se eligio sobre el mismo tramo que los folds OOS tachan de fuera de muestra"
-    bloqueos: [ISS-02]
-    siguiente_accion: "ISS-02. Sin un tramo que no entre ni en entrenamiento ni en seleccion, todo el dominio 8 no puede avanzar."
+    bloqueos: [ISS-002]
+    siguiente_accion: "ISS-002. Sin un tramo que no entre ni en entrenamiento ni en seleccion, todo el dominio 8 no puede avanzar."
     ultima_revision: "2026-10-10"
 
   - id: VAL-003
@@ -611,7 +611,7 @@ componentes:
       - "risk/validators.py: 11 funciones publicas (medido hoy)"
       - "app/main.py:576 journaliza '{verdict.rejection}: {verdict.detail}'"
     deficiencias:
-      - "Los 11 se pueden DESACTIVAR desde el panel sin autenticacion (ver ISS-02/SEG-001)"
+      - "Los 11 se pueden DESACTIVAR desde el panel sin autenticacion (ver ISS-002/SEG-001)"
     bloqueos: []
     siguiente_accion: "Ninguna sobre el motor. Es solido."
     ultima_revision: "2026-10-10"
@@ -894,22 +894,42 @@ componentes:
     nombre: "Alertas"
     dominio: 13
     descripcion: "Avisos cuando algo va mal."
-    implementacion: ausente
+    implementacion: parcial
     validacion: no_probada
-    operacion: no_operativa
+    operacion: "MEDIDA A MEDIAS: el canal envia, el bot no puede"
     criticidad: alta
-    rutas: []
+    rutas:
+      - "scripts/alerts.py"
+      - "runtime/loop.py:763,784,816,924,941,963,1075"
+      - "config/gts.yaml (seccion alerts:)"
+      - "core/ports/profiles.py::AlertsConfig"
     depende_de: [OBS-001]
     consumido_por: []
     requisitos: ["Un bot parado debe producir un aviso sin que el operador mire"]
     criterios_aceptacion: ["Existe un camino que avisa, con destinatario declarado"]
     tests: []
-    resultados_tests: "NO EXISTE"
-    evidencias: ["audit/PHASE1-REPORT.md H8: 'Alertas: ninguna, en ningun sitio' (medido 2026-10-09, NO re-verificado hoy)"]
-    deficiencies: ["El panel DEGRADA visiblemente cuando el disco esta critico o el journal no escribe; no hay aviso fuera del panel"]
-    bloqueos: []
-    siguiente_accion: "Decidir el canal de aviso (correo, webhook, fichero). Es una decision del propietario, no tecnica."
-    ultima_revision: "2026-10-10 (No re-verificado)"
+    resultados_tests: "NINGUNO. Y la suite avisa del defecto: 'RuntimeWarning: coroutine AlertManager.alert was never awaited' en test_cableado_demo.py"
+    evidencias:
+      - "MEDIDO 2026-10-14: python -m scripts.alerts --test ENTREGA en el grupo de Telegram -5504195034 (canal funciona)"
+      - "NO MEDIDO: que salga del bot. No puede: runtime/loop.py:635 recibe un AlertsConfig() vacio (app/main.py:189 no pasa alerts=)"
+      - "Y aunque lo pasara: los seis manejadores de scripts/alerts.py:361-383 son sincronos y hacen asyncio.create_task() desde el bucle sincrono del bot -> la corrutina se descarta"
+      - "Siete eventos: fill, rejection, disconnect, daily_loss, daily_loss_limit, model_serving_down, reconciliation_failed"
+      - "Deduplicacion 300 s y limite 50/hora, SOLO EN MEMORIA: un reinicio los borra"
+      - "alertmanager.yml define un receptor Telegram; el bot no lo usa"
+    deficiencies:
+      - "El panel DEGRADA visiblemente cuando el disco esta critico o el journal no escribe; no hay aviso fuera del panel"
+      - "DEDUPLICACION SIN PERSISTENCIA: dos reinicios seguidos del bot pueden duplicar cada aviso"
+      - "_check_reconciliation() es un pass (scripts/alerts.py:356) y el AlertMonitor nunca se arranca desde el bot: model_serving_down no puede dispararse desde ahi"
+      - "Dos clases AlertsConfig distintas (app/config.py:289 y core/ports/profiles.py:130); el YAML carga una y el bucle lee la otra"
+    bloqueos: [ISS-046, ISS-047]
+    siguiente_accion: "R-017: cablear alerts= en app/main.py:189, unificar los dos AlertsConfig, y sustituir asyncio.create_task por una cola que el bucle sincrono drene. Hasta las TRES capas, este componente no hace nada."
+    reevaluacion: |
+      El 2026-10-09 la auditoria dijo 'Alertas: ninguna, en ningun sitio' con
+      implementacion ausente. Hoy hay 451 lineas de codigo, un canal medido
+      funcionando y siete eventos cableados al bucle. Sigue siendo no
+      operativa desde el bot, y esa es la unica afirmacion que importa: el
+      destinatario es el bot.
+    ultima_revision: "2026-10-14 (medido)"
 
   # ─────────────── DOMINIO 14: Infraestructura y fiabilidad ───────────────
   - id: INF-001
@@ -961,7 +981,7 @@ componentes:
     resultados_tests: "verde el 2026-10-12 (bot exit 0: 1648 coleccionados, 1594 pasan, 54 saltos con motivo; panel exit 0: 500/500)"
     evidencias: ["git remote -v -> VACIO (medido 2026-10-12): sin remote no hay push que disparar", "suite-completa-20261012c.txt: ambas suites exit 0", "pyproject define pytest, mypy y ruff; el runner local ejecuta pytest, mypy/ruff siguen sin entrar en ninguna puerta"]
     deficiencies: [
-      "Los 3 fallos de ISS-01 llegaron a HEAD porque nada los ejecuta automaticamente",
+      "Los 3 fallos de ISS-001 llegaron a HEAD porque nada los ejecuta automaticamente",
       "Un lint final post-sesion quedo sin correr (README memory-graph, 2026-10-07)"
     ]
     bloqueos: ["Sin remote no puede existir CI-on-push: R-015 queda en PARCIAL por decision de infraestructura, no por descuido"]
@@ -1253,6 +1273,405 @@ componentes:
       dar, y esta escrita en disco con su procedencia.
     deficiencies:
       - "no-transaction-cost-model: RESUELTO en el codigo (core/costs.py con dos modos); el README linea 906 lo mantiene abierto y esta DESACTUALIZADO"
-    bloqueos: [ISS-02]
-    siguiente_accion: "Ninguna hasta resolver ISS-02. Sin tramo fuera de muestra no se puede cambiar esta respuesta."
+    bloqueos: [ISS-002]
+    siguiente_accion: "Ninguna hasta resolver ISS-002. Sin tramo fuera de muestra no se puede cambiar esta respuesta."
     ultima_revision: "2026-10-10"
+
+  # ─────────────── DOMINIO 19: Servido, observabilidad y camino a producción ───────────────
+  - id: SER-001
+    nombre: "Servidor de modelo (FastAPI + ONNX)"
+    dominio: 19
+    descripcion: "Sirve regime/direction/volatility/size por simbolo y temporalidad, y expone metricas de Prometheus."
+    implementacion: existe
+    validacion: no_probada
+    operacion: "MEDIDA, y ahora parado: 200 OK a ~21 ms; :8080 no escucha"
+    criticidad: alta
+    rutas: ["serving/model_server.py", "serving/Dockerfile", "serving/requirements.txt"]
+    depende_de: [ML-001]
+    consumido_por: ["config/prometheus.yml", "grafana/dashboards/gts-trading-monitor.json"]
+    requisitos:
+      - "GET /health responde sin cargar el modelo"
+      - "POST /predict devuelve las cuatro cabezas"
+      - "GET /metrics expone texto de Prometheus"
+    criterios_aceptacion: ["Un /predict con 100 velas reales devuelve 200 en menos de 50 ms"]
+    tests: []
+    resultados_tests: "NINGUNO. El unico fichero que lo toca, test_server.py, no es un test: sin def test_, sin assert"
+    evidencias:
+      - "MEDIDO 2026-10-14: POST :8080/predict -> 200 OK, ~21 ms de latencia"
+      - "NUEVE metricas, no '15+' como afirma el mensaje de bce3e59: gts_model_requests_total, gts_model_request_latency_seconds, gts_model_loaded, gts_model_version, gts_predictions_total, gts_prediction_latency_seconds, gts_prediction_pnl_r, gts_model_memory_mb, gts_model_uptime_seconds"
+      - "MEDIDO 2026-10-14: el puerto 8080 NO escucha. Prometheus lo declara 'down'"
+    deficiencies:
+      - "Sirve un .pt o un .onnx; el bot consume un .json de ModelStrategy. NO SON EL MISMO FORMATO (ver MLC-001)"
+      - "load_pytorch y load_onnx estan definidos dos veces (:195/:341 y :221/:367) con cuerpo identico"
+      - "Bloque inalcanzable en :470-515, tras un return en :468"
+      - "Sin test: no se sabe si el /predict que se midio dio numeros o ceros"
+    bloqueos: [ISS-048, ISS-052]
+    siguiente_accion: "R-026: decidir si este servidor alimenta al bot o es un camino paralelo. Depende de una decision del dueno, no de codigo."
+    ultima_revision: "2026-10-14 (medido)"
+
+  - id: SER-002
+    nombre: "Exportacion del modelo a ONNX"
+    dominio: 19
+    descripcion: "Convierte un checkpoint .pt en .onnx verificable, para servirlo sin PyTorch."
+    implementacion: existe
+    validacion: no_probada
+    operacion: no_operativa
+    criticidad: baja
+    rutas: ["serving/export_onnx.py"]
+    depende_de: [ML-001]
+    consumido_por: [SER-001]
+    requisitos: ["onnx.checker.check_model debe pasar antes de escribir"]
+    criterios_aceptacion: ["El .onnx exportado carga en onnxruntime y da la misma salida que el .pt"]
+    tests: []
+    resultados_tests: "NINGUNO"
+    evidencias: ["serving/export_onnx.py:18 export_to_onnx(...) · :117 onnx.checker.check_model"]
+    deficiencies:
+      - "No hay prueba de equivalencia .pt vs .onnx: el criterio de aceptacion NO se puede afirmar hoy"
+      - "No hay .onnx en el arbol: no se ha ejecutado nunca"
+    bloqueos: [ISS-048]
+    siguiente_accion: "R-019 (test de importacion) y luego R-020 (una exportacion real)"
+    ultima_revision: "2026-10-14"
+
+  - id: OBS-005
+    nombre: "Pila de observabilidad (Prometheus + Grafana + Alertmanager)"
+    dominio: 19
+    descripcion: "Recolecta, dibuja y enruta. Es lo que convierte un bot invisible en un bot que se puede mirar."
+    implementacion: existe
+    validacion: no_probada
+    operacion: "MEDIDA A MEDIAS: los tres contenedores contestan; un target no existe"
+    criticidad: media
+    rutas: ["docker-compose.monitoring.yml", "config/prometheus.yml", "config/alertmanager.yml", "grafana/dashboards/gts-trading-monitor.json"]
+    depende_de: [SER-001]
+    consumido_por: [operador]
+    requisitos:
+      - "Prometheus raspa solo endpoints que existen"
+      - "Todo panel del dashboard se apoya en una metrica publicada"
+    criterios_aceptacion: ["Cero targets 'down' que sean culpa del scrape"]
+    tests: []
+    resultados_tests: "NINGUNO"
+    evidencias:
+      - "MEDIDO 2026-10-14: :9090, :9093 y :3000 aceptan conexiones"
+      - "Dashboard 'gts-trading-monitor' con 12 paneles, aprovisionado por grafana/dashboards/dashboard-provider.yml"
+      - "Los 12 paneles consumen LAS NUEVE metricas de SER-001 (correcto: el dashboard no inventa series)"
+    deficiencies:
+      - "config/prometheus.yml:30-37 declara el trabajo 'gts-trading-loop' contra host.docker.internal:9090/metrics. El bot NO expone /metrics, y el 9090 es el puerto del PROPIO Prometheus: el trabajo no puede estar bien"
+      - "config/alertmanager.yml y config/gts.yaml llevan el MISMO token de Telegram en claro (ISS-047)"
+      - "Grafana se aprovisiona en :3000 con admin/changeme123 — credencial de fabrica, en una maquina de trabajo"
+    bloqueos: [ISS-052]
+    siguiente_accion: "R-027: quitar el trabajo 'gts-trading-loop' o darle al bot un /metrics de verdad. Decidir cual."
+    ultima_revision: "2026-10-14 (medido)"
+
+  - id: LIVE-001
+    nombre: "Camino a live: perfiles, doble llave y gateway MT5"
+    dominio: 19
+    descripcion: "execution.profile elige el puerto de ordenes; LIVE exige tres condiciones a la vez."
+    implementacion: existe
+    validacion: probada
+    operacion: "MEDIDA EN DEMO. LIVE, por decision del dueno"
+    criticidad: critica
+    rutas: ["core/ports/profiles.py", "app/main.py::_perfil_de", "adapters/broker/mt5_orders.py::order_port_para", "config/gts.yaml"]
+    depende_de: [CTL-001, RISK-001]
+    consumido_por: [scripts/go_live.py, scripts/preflight_live.py, scripts/flatten.py]
+    requisitos:
+      - "LIVE exige live.enabled AND allow_funded AND account_info().trade_mode != DEMO"
+      - "Todos los demas perfiles exigen live.enabled: false"
+      - "--dry-run nunca llama a mt5.order_send(), en ningun perfil"
+    criterios_aceptacion:
+      - "Una cuenta DEMO con el perfil LIVE lanza RuntimeError antes de criar el puerto"
+      - "allow_funded=False en LIVE devuelve puerto None"
+    tests: ["tests/test_cableado_demo.py", "tests/test_no_order_path.py", "tests/test_live_execution.py", "tests/test_research_cannot_trade.py"]
+    resultados_tests: "verde. 38 tests pasan en el bloque de la demo (test_cableado_demo, test_label_barriers, test_regime_gate, test_train_pipeline_wiring)"
+    evidencias:
+      - "MEDIDO 2026-10-14: perfil DEMO operativo. preflight_live -> PASS (MT5 build 6259, cuenta 10012953169, Algo Trading ON, XAUUSD OK, 10.000 USD libres)"
+      - "MEDIDO 2026-10-14: bot lanzado desde el panel -> pid 16932, dry_run=true, control_seq 6->7"
+      - "config/gts.yaml: execution.profile: research (el valor de fabrica), live.enabled: false"
+      - "D-033: dry-run es un MODO, no un perfil. D-034: LIVE son TRES llaves"
+    deficiencies:
+      - "El YAML de fabrica declara profile: research; el perfil demo se aplica con go_live --profile demo. Es correcto, pero obliga a recordarlo"
+    bloqueos: []
+    siguiente_accion: "Ninguna. El techo es demo, por decision del dueno (2026-10-14)."
+    reevaluacion: |
+      Este es el unico componente del trabajo nuevo que se puede marcar
+      `validacion: probada`. La doble llave de LIVE esta bien puesta: tres
+      condiciones, de las cuales una la comprueba el BROKER y no el YAML.
+      Que no se haya recorrido el camino LIVE no lo hace menos real; lo que
+      lo haria mal es haberlo recorrido.
+    ultima_revision: "2026-10-14 (medido en demo)"
+
+  - id: LIVE-002
+    nombre: "RUNBOOK_LIVE.md — el procedimiento escrito"
+    dominio: 19
+    descripcion: "El documento que se sigue con prisa y con dinero en la cuenta."
+    implementacion: existe
+    validacion: no_probada
+    operacion: "NO EJECUTABLE: describe siete cosas que no existen"
+    criticidad: alta
+    rutas: ["RUNBOOK_LIVE.md"]
+    depende_de: [LIVE-001, OPS-004, OPS-006, OPS-007]
+    consumido_por: [operador]
+    requisitos: ["Cada comando del runbook tiene que existir y hacer lo que dice"]
+    criterios_aceptacion: ["Cero comandos del runbook que no se puedan copiar y ejecutar"]
+    tests: []
+    resultados_tests: "NINGUNO, y no hay forma de que los haya sin ejecutarlos"
+    evidencias:
+      - "260 lineas, Version 1.0, Status: DRAFT — Review before first live run"
+      - "7 secciones: prerrequisitos, pre-flight, go-live, monitorizacion, emergencia, reconciliacion, incidente"
+      - "Siete divergencias medidas: 'python -m gts flatten', 'python -m gts stop', 'sudo systemctl start gts-bot', /health del bot, 'journal hash chain intact', '--daemon' en alerts.py, y un 'Step 4' duplicado"
+    deficiencies:
+      - "Un runbook con comandos inventados es PEOR que ninguno: no falla al leerlo, falla a las tres de la manana"
+      - "El documento marca su propio DRAFT, lo cual es honesto; pero DRAFT no es lo que se mira con el mercado abierto"
+    bloqueos: [ISS-051]
+    siguiente_accion: "R-022: arreglar las siete lineas y quitar el DRAFT, o retitularlo como documento no ejecutable. Antes de cualquier sesion con dinero delante."
+    ultima_revision: "2026-10-14"
+
+  - id: OPS-004
+    nombre: "Pre-flight de live (8 comprobaciones)"
+    dominio: 19
+    descripcion: "Ocho preguntas antes de dejar que el sistema toque dinero. Devuelve un codigo de salida, no un log."
+    implementacion: existe
+    validacion: no_probada
+    operacion: "MEDIDA: PASS en demo"
+    criticidad: alta
+    rutas: ["scripts/preflight_live.py"]
+    depende_de: [LIVE-001]
+    consumido_por: [scripts/go_live.py, operador]
+    requisitos:
+      - "Las 8: MT5 conectado · cuenta · simbolos · posiciones abiertas · ordenes pendientes · margen · config coherente · directorios escribibles"
+      - "Devuelve 0 si todo pasa, 1 en strict si algo falla"
+    criterios_aceptacion: ["Una cuenta DEMO con perfil LIVE falla, y dice cual de las tres llaves falta"]
+    tests: []
+    resultados_tests: "NINGUNO"
+    evidencias:
+      - "MEDIDO 2026-10-14: python -m scripts.preflight_live --config config/gts.yaml -> PASS"
+      - "MT5 build 6259 · cuenta 10012953169 · trade_allowed=True · XAUUSD disponible · 10.000 USD de margen libre"
+    deficiencies:
+      - "check_positions() exige CERO posiciones sin filtrar por magic (comentario en :107): una posicion ajena bloquea el paso"
+      - "check_directories() usa rutas relativas al directorio de trabajo, no a la raiz del repositorio (:170)"
+      - "Sin test: las 8 comprobaciones no se han ejercitado nunca contra un fallo"
+    bloqueos: [ISS-048]
+    siguiente_accion: "R-019 (tests) y R-024 (magic desde el YAML, junto a flatten y reconcile)"
+    ultima_revision: "2026-10-14 (medido)"
+
+  - id: OPS-005
+    nombre: "Go-live CLI"
+    dominio: 19
+    descripcion: "Reescribe la config con deep_merge, pasa el pre-flight, y arranca app.main con el perfil pedido."
+    implementacion: existe
+    validacion: no_probada
+    operacion: no_operativa
+    criticidad: media
+    rutas: ["scripts/go_live.py"]
+    depende_de: [OPS-004, LIVE-001]
+    consumido_por: [operador]
+    requisitos: ["El pre-flight devuelve 0 o el proceso no arranca", "La config original se conserva salvo que se apunte a ella"]
+    criterios_aceptacion: ["--profile live --allow-funded sin cuenta fondeada no arranca, y dice por que"]
+    tests: []
+    resultados_tests: "NINGUNO"
+    evidencias:
+      - "deep_merge (L60) corregido en esta sesion: la sobreescrita anidia las claves y no llegaba a las hojas"
+      - "Escribe una config temporal, hace fsync, y la borra en el finally salvo que sea la ruta pedida"
+    deficiencies:
+      - "Reescribe sys.argv para llamar a app.main.main() (L149-151): un acoplamiento invisible que solo se ve leyendo"
+      - "--daemon / auto-enable para demo y live: comportamiento implicito sin declaracion de como se decide"
+    bloqueos: [ISS-048]
+    siguiente_accion: "R-019"
+    ultima_revision: "2026-10-14"
+
+  - id: OPS-006
+    nombre: "Aplanado de emergencia (kill switch)"
+    dominio: 19
+    descripcion: "Cierra todas las posiciones y cancela todas las ordenes pendientes, con --force para que de verdad lo haga."
+    implementacion: existe
+    validacion: no_probada
+    operacion: no_operativa
+    criticidad: CRITICA
+    rutas: ["scripts/flatten.py"]
+    depende_de: [LIVE-001]
+    consumido_por: [operador]
+    requisitos: ["Sin --force, enseña lo que haria y no lo hace", "Solo corre en DEMO o LIVE"]
+    criterios_aceptacion: ["Cierra las posiciones del bot, no las de otro"]
+    tests: []
+    resultados_tests: "NINGUNO. Es el script con menos tests y mas consecuencias del repositorio"
+    evidencias:
+      - "Por defecto es dry-run: --force es lo que envia (L41)"
+      - "Rechaza correr fuera de DEMO/LIVE (L69-71)"
+    deficiencies:
+      - "magic = 123456 HARDCODEADO (L82, con su propio '# TODO: get from config'); app/main.py usa cfg.system.bot_magic. Un aplanado que no ve las posiciones del bot no aplana las posiciones del bot"
+      - "build_runtime_config() (L29) recibe dos overrides, tiene un `pass` de cuerpo, y NADIE LO LLAMA"
+      - "El Intent se fabrica con type('Intent', (), {...})() en vez de importar el puerto real (L120-127): no se puede verificar que sea correcto leyendo"
+      - "Sin test. Nunca se ha ejecutado contra una posicion real, ni simulada"
+    bloqueos: [ISS-053]
+    siguiente_accion: "R-024: leer el magic del YAML, importar el Intent de verdad, y un test que afirme que ve las posiciones del bot. Es el primer script que se ejecuta con dinero delante."
+    ultima_revision: "2026-10-14"
+
+  - id: OPS-007
+    nombre: "Reconciliacion de sesion"
+    dominio: 19
+    descripcion: "Compara el diario de decisiones con el historico del broker, y dice en que no cuadran."
+    implementacion: existe
+    validacion: no_probada
+    operacion: no_operativa
+    criticidad: media
+    rutas: ["scripts/reconcile_session.py"]
+    depende_de: [ACC-002]
+    consumido_por: [operador]
+    requisitos: ["Solo lectura: no envia nada", "Dice cual es la fuente de verdad cuando discrepan"]
+    criterios_aceptacion: ["Un diario ausente es un fallo, no un 'todo cuadra con cero operaciones'"]
+    tests: []
+    resultados_tests: "NINGUNO"
+    evidencias: ["Lee data/journal/decisions.jsonl y mt5.history_deals_get; compara ticket, simbolo, lado, volumen, precios y beneficio"]
+    deficiencies:
+      - "magic != 123456 hardcodeado (L78), el mismo bug que flatten.py:82"
+      - "Si el diario NO EXISTE devuelve [] con un aviso (L31-33): una bitacora rota reconcilia como '0 contra N' en vez de fallar. Es el fallo mas peligroso del script"
+      - "RUNBOOK_LIVE.md §5 promete verificar la cadena de hash del diario. Este script NO verifica ninguna cadena"
+    bloqueos: [ISS-053]
+    siguiente_accion: "R-024"
+    ultima_revision: "2026-10-14"
+
+  - id: EVF-001
+    nombre: "Filtro de entrada por Expected Value neto (pilar 1)"
+    dominio: 19
+    descripcion: "Antes de que el dimensionador mire la operacion, se pregunta si tiene expectativa positiva neta de costes."
+    implementacion: existe
+    validacion: no_probada
+    operacion: no_operativa
+    criticidad: alta
+    rutas: ["risk/entry_filter.py", "core/usecases/process_bar.py:40", "jobs/runners/walkforward_v2.py:40"]
+    depende_de: [FEAT-001]
+    consumido_por: [core/usecases/process_bar.py]
+    requisitos:
+      - "E = p_win*G - (1-p_win)*L - C, y se admit si E >= min_expectancy_r * L"
+      - "Con menos de min_trades_for_p operaciones, p_win se mezcla con una prior (0.50, peso 10)"
+    criterios_aceptacion: ["Una operacion con E negativo NO llega al dimensionador"]
+    tests: []
+    resultados_tests: "NINGUNO. 0 referencias en tests/ y dashboard/tests/"
+    evidencias:
+      - "275 lineas; cuatro presets por familia de estrategia (trend-following 0.15R, mean-reversion 0.08R, breakout 0.12R, scalping 0.05R)"
+      - "estimate_costs_r() (L272) convierte spread, comision, deslizamiento y distancia de SL en multiplos de R"
+      - "SIN PARAMETROS LEIDOS DE FICHERO: es una funcion pura, no lee config ni entorno"
+    deficiencies:
+      - "defaultdict... no. min_win_prob (L57) se declara y documenta, y evaluate() NO LO LEE"
+      - "DEFAULT_EV_FILTER definido DOS veces (L171 y L264), identico"
+      - "process_bar.py lo importa: nadie ha pasado por el una operacion real medida"
+    bloqueos: [ISS-048]
+    siguiente_accion: "R-019: test de la formula y de la frontera (E == umbral debe admitirse, y el motivo va escrito)"
+    ultima_revision: "2026-10-14"
+
+  - id: MLC-001
+    nombre: "p_win del modelo para el filtro EV"
+    dominio: 19
+    descripcion: "Sustituir la prior conservadora por la probabilidad calibrada del modelo."
+    implementacion: ausente
+    validacion: no_probada
+    operacion: no_operativa
+    criticidad: media
+    rutas: ["risk/ml_integration.py"]
+    depende_de: [ML-001]
+    consumido_por: []
+    requisitos: ["load() lee el modelo del disco", "predict() devuelve probabilidades, no constantes"]
+    criterios_aceptacion: ["Con un modelo presente, p_win sale del modelo y no del default"]
+    tests: []
+    resultados_tests: "NINGUNO"
+    evidencias:
+      - "STUB, medido leyendo el fichero: load() es un '# TODO' (L58-60); predict() devuelve p_long=0.33, p_short=0.34, p_flat=0.33 escritas a mano (L69-81); _regime_adjustment() devuelve 0.0 (L143)"
+      - "Consecuencia mecanica: regime_confidence=0.0 < min_confidence=0.6, asi que estimate_p_win SIEMPRE cae al fallback_p_win=0.45"
+      - "No lo invoca NADA: los unicos imports vienen de risk/__init__.py"
+    deficiencies:
+      - "Es un andamiaje con documentacion de intencion. MLEnhancedEVFilter y create_ml_enhanced_filter() son API sin implementacion detras"
+      - "Un nombre que dice 'integracion del modelo ML' sin modelo integrated. Peligroso para quien lo lea por encima"
+    bloqueos: [ISS-048]
+    reevaluacion: |
+      Este es el componente que mas engaña por su nombre: MLEnhancedEVFilter
+      suena a una capacidad y es un `pass` con firma. Si alguien lo importa
+      creyendo que hay un modelo detras, el filtro dara 0.45 con una
+      confianza que el sistema nunca midio.
+    siguiente_accion: "O se implementa (R-020) o se borra. Un stub con nombre de capacidad es peor que una ausencia declarada."
+    ultima_revision: "2026-10-14"
+
+  - id: MLX-001
+    nombre: "Etiquetado por PnL para entrenamiento (pilar 3)"
+    dominio: 19
+    descripcion: "La etiqueta es el beneficio neto en multiplos de R, no la direccion. Eso es lo que separa un modelo util de uno que aprende la direccion."
+    implementacion: parcial
+    validacion: no_probada
+    operacion: "NO OPERATIVA: NameError en el primer epoch"
+    criticidad: alta
+    rutas: ["research/pnl_labeling.py", "config/train_pnl.yaml", "checkpoints_training/pnl/"]
+    depende_de: [ML-001]
+    consumido_por: []
+    requisitos:
+      - "Etiqueta en multiplos de R: net_profit / riesgo, no net_profit"
+      - "Barra triple con barreras de-profit, de-perdida y de-tiempo"
+    criterios_aceptacion: ["Un epoch completo sin excepcion y con checkpoints escritos"]
+    tests: []
+    resultados_tests: "NINGUNO. test_pnl.py existe en la raiz y NO es un test: sin def test_, sin assert, con try/except que se traga sus propios errores"
+    evidencias:
+      - "693 lineas: PnLLabelConfig, PnLLabeler, PnLModelHead (cabeza de PnL + direccion + incertidumbre + 5 cuantiles), PnLLoss, PnLTrainingConfig, PnLTrainer"
+      - "Escribe checkpoints_training/pnl/{best,epoch_N}.pt con su optimizador y su config"
+    deficiencies:
+      - "NameError: defaultdict se usa en :563 y :609 y NO se importa. Revienta en el primer epoch"
+      - "_setup_data() (L552) es un `pass`: train_loader y val_loader nunca se asignan"
+      - "batch_size no definido en _train_epoch (L596-600)"
+      - "Seis campos repetidos entre PnLLabelConfig y PnLLabelResult; en Python gana el ultimo y no se ve leyendo"
+      - "El bloque de imports esta pegado dos veces (lineas 16-22 y otra vez): el fichero se monto concatenando"
+      - "config/train_pnl.yaml declara label_config DOS veces (L17 y L32), y PnLTrainingConfig(**yaml) no coacciona un dict anidado"
+    bloqueos: [ISS-049, ISS-052]
+    siguiente_accion: "R-019 (importar defaultdict lo caza un test de importacion) y luego R-020: ejecutar UN epoch de verdad y mirar lo que sale"
+    ultima_revision: "2026-10-14"
+
+  - id: WF2-001
+    nombre: "Runner de walk-forward v2 (pilar 2)"
+    dominio: 19
+    descripcion: "Cuatro pasos: cargar checkpoint, walk-forward purgado con embargo, metricas por regimen con chequeo de decaimiento, y resultado auditable con procedencia."
+    implementacion: parcial
+    validacion: no_probada
+    operacion: "NO OPERATIVA: NameError en el primer tick de progreso"
+    criticidad: alta
+    rutas: ["jobs/runners/walkforward_v2.py", "config/walkforward.yaml", "data/research/walkforward_*.json"]
+    depende_de: [ML-001, EVF-001]
+    consumido_por: []
+    requisitos:
+      - "Purga y embargo entre ventanas de entrenamiento y prueba"
+      - "Escribe la procedencia: commit, modelo, epoch, sha256 de los datos por simbolo"
+      - "Escribe el progreso en data/control/walkforward.json de forma atomica, y lo cancela con un fichero"
+    criterios_aceptacion: ["Un fold completo, con metricas por regimen y procedencia escrita"]
+    tests: []
+    resultados_tests: "NINGUNO"
+    evidencias:
+      - "488 lineas; escribe data/research/walkforward_{id}.json y data/control/walkforward.json"
+      - "El atomic write (tmp + replace) esta bien, y esta escrito DOS veces identico (:245 y :258)"
+    deficiencies:
+      - "NameError: _progress_cb (:273,:277,:279) referencia state, total_folds y current_symbol, ninguna definida en ese ambito. Se alcanza en CADA tick (L361-365)"
+      - "Once campos de dataclass declarados 2-3 veces cada uno. Gana el ultimo: nadie puede saber leyendo el fichero cual manda"
+      - "El docstring anuncia '--config config/walkforward.yaml'; main() no lo tiene, y el YAML NUNCA se lee (L10 vs :428)"
+      - "config/walkforward.yaml declara min_regime_confidence, conservative y broker DOS veces"
+      - "correr() existe como puente de la cola pero no esta registrado en jobs/runners/__init__.py: no se puede lanzar desde el panel"
+    bloqueos: [ISS-049, ISS-052]
+    siguiente_accion: "R-019 y luego R-020: ejecutar UN fold. El walk-forward es la unica forma de que VAL-002 deje de ser 'No evaluado', y hoy no se puede ejecutar."
+    ultima_revision: "2026-10-14"
+
+  - id: QA-005
+    nombre: "Cobertura del trabajo bce3e59"
+    dominio: 15
+    descripcion: "Los quince ficheros nuevos del commit de monitorizacion, alertas y live, y sus vallas."
+    implementacion: ausente
+    validacion: no_probada
+    operacion: no_operativa
+    criticidad: ALTA
+    rutas: []
+    depende_de: [QA-001]
+    consumido_por: []
+    requisitos: ["Cada modulo nuevo entra con al menos un test de importacion y uno de contrato"]
+    criterios_aceptacion: ["Cero modulos nuevos sin test (con una valla AST que lo impida)"]
+    tests: []
+    resultados_tests: "CERO. 13 modulos, 0 referencias en tests/ y dashboard/tests/"
+    evidencias:
+      - "MEDIDO 2026-10-14, grep sobre tests/*.py y dashboard/tests/*.py: entry_filter=0, ml_integration=0, regime_integration=0, strategy_performance=0, pnl_labeling=0, walkforward_v2=0, model_server=0, export_onnx=0, scripts.alerts=0, scripts.flatten=0, scripts.go_live=0, preflight_live=0, reconcile_session=0"
+      - "Los tests que EL COMMIT SI TOCO (test_cableado_demo, test_guardia_cientifica, test_fase2_protocolo) no tocan ninguno de los 13"
+      - "test_pnl.py y test_server.py estan en la raiz, no en tests/, no tienen funcion de test ni assert, y se commitearon"
+    deficiencies:
+      - "La valla que hace falta es barata: un test de importacion por modulo coge los DOS NameError y dos de los doce duplicados"
+      - "El patron de valla AST que ya existe para el panel (D-031) se puede reutilizar tal cual"
+    bloqueos: [ISS-048]
+    siguiente_accion: "R-019. Es la tarea mas barata de la lista y la que mas defectos caza."
+    ultima_revision: "2026-10-14 (medido)"

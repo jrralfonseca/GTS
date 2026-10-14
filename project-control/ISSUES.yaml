@@ -410,7 +410,7 @@ issues:
     tipo: infraestructura
     resumen: >
       No existe .github ni ningun pipeline. pyproject define pytest, mypy y ruff,
-      pero nada los corre automaticamente. Los 3 fallos de ISS-01 llegaron a HEAD
+      pero nada los corre automaticamente. Los 3 fallos de ISS-001 llegaron a HEAD
       porque no habia una puerta.
     evidencia:
       - "Test-Path .github -> False (medido hoy)"
@@ -674,7 +674,7 @@ issues:
       `decisions` y el hecho de que runtime no conoce app - con la
       historia del ciclo en una linea, para que nadie lo reintroduzca sin
       saber que existio.
-    verificado: "2026-10-12: `Select-String runtime\loop.py 'from app'` -> 0; decisions/decide.py solo importa core."
+    verificado: '2026-10-12: `Select-String runtime\loop.py "from app"` -> 0; decisions/decide.py solo importa core.'
     siguiente_accion: "ninguna"
 
   - id: ISS-022
@@ -1024,12 +1024,12 @@ issues:
     tipo: riesgo
     resumen: >
       El test de paridad exige que el reparto entre procesos de EXACTAMENTE los
-      mismos numeros que en serie. Ese test es de los 3 que falla por ISS-01, asi
+      mismos numeros que en serie. Ese test es de los 3 que falla por ISS-001, asi
       que hoy la paridad NO esta verificada en la suite completa (aunque si aislada).
     evidencia: ["tests/test_sweep_parallel.py::test_el_reparto_devuelve_exactamente_el_mismo_resultado — PASA aislado, FALLA en suite completa"]
     por_que_importa: "Un paralelismo que cambia un numero se lee como evidencia. La valla existe; el fallo es del arnes."
     pruebas_que_lo_fijan: "los 3 tests de ISS-001"
-    fix_propuesto: "Resolver ISS-01."
+    fix_propuesto: "Resolver ISS-001."
     coste: trivial
     reversibilidad: trivial
     estado: RESUELTO
@@ -1253,3 +1253,365 @@ issues:
     estado: RESUELTO
     siguiente_accion: "ninguna"
     detectado_en: "2026-10-11, nota residual de la auditoria del panel; resuelto el mismo dia por decision del dueno"
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # TRABAJO bce3e59 — servido, alertas y camino a live (2026-10-14)
+  # ══════════════════════════════════════════════════════════════════════════
+
+  - id: ISS-046
+    titulo: "El bot NO puede emitir alertas: no tiene canales y su manejador no se puede ejecutar"
+    severidad: CRITICA
+    confirma: si
+    componente: [ALR-001, INF-001]
+    tipo: defecto_confirmado
+    resumen: >
+      Dos capas, y basta con que falle una. (1) app/main.py:189 construye el
+      RuntimeConfig sin pasar `alerts=`, de modo que el AlertManager de
+      runtime/loop.py:635 recibe siempre el AlertsConfig() por defecto, con
+      telegram.enabled=False, y registra "No alert channels configured": el
+      token del YAML no llega al bot. (2) Los seis manejadores de
+      AlertMonitor (scripts/alerts.py:361-383) son SINCRONOS y llaman a
+      asyncio.create_task() sobre una corrutina; los invoca el bucle sincrono
+      de runtime/loop.py, donde no hay bucle de eventos, asi que la corrutina
+      se descarta sin ejecutarse.
+    evidencia:
+      - "app/main.py:189 -> RuntimeConfig(profile=perfil, policy=RiskPolicy.ENFORCE, allow_funded=allow_funded)"
+      - "core/ports/profiles.py::AlertsConfig declara telegram.enabled=False por defecto"
+      - "scripts/alerts.py:363,367,371,376,379,383 -> asyncio.create_task(...) desde metodos sync"
+      - "PRUEBA, no hipotesis: la suite lo dice en su salida — tests/test_cableado_demo.py::test_demo_con_puerto_si_envia_por_ese_puerto emite 'RuntimeWarning: coroutine AlertManager.alert was never awaited'"
+      - "Lo que SI funciona: python -m scripts.alerts --test entrega en el grupo -5504195034"
+    por_que_importa: >
+      Todo el sistema de alertas de §2.3 del informe es decorativo. Si el bot
+      entrara en perdida diaria, perdiera la conexion o le rechazaran una
+      orden, no lo dira nadie. La frase "las alertas funcionan" era cierta del
+      script suelto y falsa del bot, y era la frase que iba a sostener una
+      decision de capital.
+    fix_propuesto: >
+      (1) Pasar alerts=cfg.alerts en _perfil_de y unificar los dos
+      AlertsConfig (ver ISS-047b). (2) Sustituir asyncio.create_task por una
+      cola que el bucle drena: el bucle de runtime es sincrono y las alertas
+      no pueden dejar de ser asincronas solo porque las emita un codigo
+      sincrono. (3) Un test que afirme que el camino esta CABLEADO, no que la
+      funcion existe.
+    coste: medio
+    reversibilidad: trivial
+    estado: ABIERTO
+    siguiente_accion: "R-017. Es lo primero que se arregla: hasta que las dos capas esten, el resto de la observabilidad mide el servidor de modelo y nada mas."
+    detectado_en: "2026-10-14, revision completa del commit bce3e59"
+
+  - id: ISS-047
+    titulo: "Un token de bot de Telegram en claro, versionado, por duplicado"
+    severidad: CRITICA
+    confirma: si
+    componente: [ALR-001, SEG-004]
+    tipo: riesgo_de_seguridad
+    resumen: >
+      La credencial del bot de Telegram esta escrita en dos ficheros que estan
+      en el indice de git, en claro y con el mismo valor. Cualquiera con el
+      repositorio puede escribir en el grupo -5504195034 en nombre de GTS.
+    evidencia:
+      - "config/gts.yaml:471 -> bot_token: 8505587639:AAGmzuOiAN0SM2oP7XlSMnKfKK7R0TZtUrM"
+      - "config/alertmanager.yml:27 -> bot_token: '8505587639:AAGmzuOiAN0SM2oP7XlSMnKfKK7R0TZtUrM'"
+      - "git grep -n '8505587639' -- config  -> 2 coincidencias, ambas versionadas"
+    por_que_importa: >
+      Es la unica de las dos criticas de este bloque que NO se arregla desde
+      dentro del repositorio. Revocar el token es una accion en @BotFather;
+      sacarlo del YAML es codigo. Si solo se hace la segunda, el token viejo
+      sigue vivo para cualquiera que tenga el historico.
+    fix_propuesto: >
+      (1) Revocar en @BotFather y generar uno nuevo. (2) Mover el valor a
+      variable de entorno o a dashboard/.env, que ya esta en .gitignore.
+      (3) Limpiar el historico — con la decision escrita en DECISIONS.md,
+      porque reescribir el historial es de las pocas cosas que este proyecto
+      hace explicito.
+    coste: bajo
+    reversibilidad: "media (limpiar el historial reescribe commits)"
+    estado: ABIERTO
+    requiere_decision_del_propietario: true
+    siguiente_accion: "R-018. Preguntar al dueno antes de reescribir el historial: es decision suya, no mia."
+    detectado_en: "2026-10-14, revision completa del commit bce3e59"
+
+  - id: ISS-048
+    titulo: "Cero cobertura de tests sobre los 13 modulos del commit bce3e59"
+    severidad: ALTA
+    confirma: si
+    componente: [QA-005, SER-001, OPS-004, EVF-001, MLX-001, WF2-001]
+    tipo: Runnable_ausente
+    resumen: >
+      Los quince ficheros nuevos del commit no tienen un solo test. Los dos
+      que los tocan (test_pnl.py, test_server.py, en la raiz) NO son tests:
+      no tienen funcion de test ni assert, solo print dentro de un
+      try/except que se traga sus propias excepciones.
+    evidencia:
+      - "grep sobre tests/*.py y dashboard/tests/*.py: entry_filter=0, ml_integration=0, regime_integration=0, strategy_performance=0, pnl_labeling=0, walkforward_v2=0, model_server=0, export_onnx=0, scripts.alerts=0, scripts.flatten=0, scripts.go_live=0, preflight_live=0, reconcile_session=0"
+      - "test_pnl.py y test_server.py: sin `def test_`, sin `assert`, con sys.path.insert(0,'D:/WorkSpace/GTS') hardcodeado"
+      - "Ninguno esta en tests/, que es la raiz de la suite (tests/test_test_suite_is_sane.py)"
+      - "Los tests modificados en el commit (test_cableado_demo.py, test_guardia_cientifica.py, test_fase2_protocolo.py) no tocan ninguno de los modulos nuevos"
+    por_que_importa: >
+      Contradice D-030, que dice que el numero de tests no es evidencia de
+      fiabilidad. Aqui el problema es el otro: no hay NINGUNO, y los dos
+      NameError de ISS-049 mas los doce duplicados de ISS-052 habrian caido
+      con un test de importacion. Quince modulos sin vallas es exactamente el
+      estado que D-030 describe como el unico que nadie mira.
+    fix_propuesto: >
+      Empezar por lo barato y de mayor rendimiento: un test de importacion por
+      modulo (coge los dos NameError), un test de contrato de las claves de
+      config que cada uno lee, y una valla AST que impida que un modulo nuevo
+      entre sin test — como la que ya existe para el panel (D-031).
+    coste: bajo
+    reversibilidad: trivial
+    estado: ABIERTO
+    siguiente_accion: "R-019"
+    detectado_en: "2026-10-14, revision completa del commit bce3e59"
+
+  - id: ISS-049
+    titulo: "Dos NameError que impiden ejecutar los pilares 2 y 3 de punta a punta"
+    severidad: ALTA
+    confirma: si
+    componente: [MLX-001, WF2-001]
+    tipo: defecto_confirmado
+    resumen: >
+      El etiquetado por PnL usa `defaultdict` sin importarlo, y el runner de
+      walk-forward referencia tres variables que no estan definidas en el
+      ambito de su callback de progreso. Los dos reventan en la primera
+      ejecucion real, no en un caso raro.
+    evidencia:
+      - "research/pnl_labeling.py:563 y :609 usan defaultdict(float); el bloque de imports (lineas 16-33) no lo trae"
+      - "jobs/runners/walkforward_v2.py:273,277,279 referencian state, total_folds y current_symbol — ninguna definida en ese ambito"
+      - "El callback se alcanza en cada tick de backtest.run(progress_callback=...), lineas 361-365"
+    por_que_importa: >
+      Los tres pilares se presentaron como piezas construidas. Dos de los tres
+      no han ejecutado nunca, y no por una condicion de datos: por un nombre
+      que no existe. El que se documenta como 'implementacion: parcial' en
+      COMPONENTS.yaml es, para un runner, lo mismo que no existir.
+    fix_propuesto: "Importar defaultdict; pasar state/total_folds/current_symbol por cierre o por argumentos. Y despues, un test que llame a cada uno una vez."
+    coste: bajo
+    reversibilidad: trivial
+    estado: ABIERTO
+    siguiente_accion: "R-019 (los caza el test de importacion) y luego R-020: ejecutar un fold y un epoch de verdad"
+    detectado_en: "2026-10-14, revision completa del commit bce3e59"
+
+  - id: ISS-050
+    titulo: "176 ficheros de basura en el indice: artefactos de test, logs y scripts de prueba"
+    severidad: ALTA
+    confirma: si
+    componente: [QA-005, SEG-004]
+    tipo: higiene_del_repositorio
+    resumen: >
+      bce3e59 se hizo con `git add -A` sin revisar que entraba. Se llevo por
+      delante resultados de pytest, logs de arranque y tres scripts de prueba
+      de la raiz que no son parte del sistema.
+    evidencia:
+      - "~171 ficheros bajo tmp_pytest*/, data/tests/ y _otra_forma0/ (artefactos de corrida de tests)"
+      - "Logs: panel-prueba.log, server.log, sweep_XAUUSD_M15.log, sweep_XAUUSD_M15.err"
+      - "Scripts de prueba en la raiz: testmt5.py, test_pnl.py, test_server.py"
+      - ".gitignore se modifico en el MISMO commit, despues de anadir"
+    por_que_importa: >
+      El arbol deja de ser indice de lo que el sistema es. Un reviewer que
+      abre el commit ve 236 ficheros y 19.325 lineas, y la proporcion de
+      codigo real es de alrededor de una cuarta parte. Ademas,_results de
+      tests versionados son una invitacion a que alguien los cite como
+      evidencia de una corrida que no fue tal.
+    fix_propuesto: >
+      `git rm --cached` de los 176 (NO borrar del disco de trabajo), una regla
+      en .gitignore para tmp_pytest*/ y *.log, y decidir con el dueno si se
+      limpia el commit o se deja el historial y se corrige hacia adelante.
+    coste: bajo
+    reversibilidad: trivial
+    estado: ABIERTO
+    requiere_decision_del_propietario: true
+    siguiente_accion: "R-021. Preguntar antes de reescribir el historial: es decision suya."
+    detectado_en: "2026-10-14, revision completa del commit bce3e59"
+
+  - id: ISS-051
+    titulo: "RUNBOOK_LIVE.md describe siete comandos y afirmaciones que no existen"
+    severidad: MEDIA
+    confirma: si
+    componente: [LIVE-002, OPS-006]
+    tipo: documentacion_falsa
+    resumen: >
+      El runbook del camino a live es el documento que se sigue con prisa y con
+      dinero en la cuenta. Siete de sus afirmaciones no se corresponden con el
+      codigo.
+    evidencia:
+      - "§4 L145 y L169: 'python -m gts flatten --force' y 'python -m gts stop' — no existe ningun CLI 'gts'; el real es 'python -m scripts.flatten --config config/gts.yaml --force'"
+      - "§2 L69: 'sudo systemctl start gts-bot' — no hay unidad systemd; la maquina es Windows"
+      - "§2 L76: '/health' del bot — el bot no expone /health; el 8080 es el del servidor de modelo"
+      - "§5 L188: 'Journal hash chain intact' — reconcile_session.py no verifica ninguna cadena de hash"
+      - "§2: 'Step 4' aparece dos veces (L81 y L96)"
+      - "scripts/alerts.py:6 documenta '--daemon'; main() (L409) no lo implementa"
+    por_que_importa: >
+      Un runbook con comandos inventados es peor que no tener runbook: no
+      falla al leerlo, falla a las tres de la mañana. El documento esta
+      marcado DRAFT, lo cual es honesto, pero DRAFT no es lo que el operador
+      va a mirar cuando el mercado este abierto.
+    fix_propuesto: >
+      Arreglar las siete lineas y quitar la palabra DRAFT, o cambiar el titulo
+      por algo que no invite a ejecutarlo. Mientras tanto, la unica puerta real
+      es scripts/preflight_live.py, que existe y funciona.
+    coste: bajo
+    reversibilidad: trivial
+    estado: ABIERTO
+    siguiente_accion: "R-022. Antes de cualquier sesion con dinero delante."
+    detectado_en: "2026-10-14, revision completa del commit bce3e59"
+
+  - id: ISS-052
+    titulo: "Prometheus raspa un endpoint que no existe, y el commit se llevo codigo duplicado por concatenacion"
+    severidad: MEDIA
+    confirma: si
+    componente: [OBS-001, SER-001, EVF-001, WF2-001, MLX-001]
+    tipo: defecto_confirmado
+    resumen: >
+      Dos familias de defecto con la misma causa: ficheros montados pegando
+      bloques, sin leer lo que ya estaba.
+    evidencia:
+      - "config/prometheus.yml:30-37 declara el trabajo 'gts-trading-loop' contra host.docker.internal:9090/metrics. El bot NO expone /metrics, y el 9090 es el puerto del propio Prometheus."
+      - "serving/model_server.py: load_pytorch en :195 y :341 · load_onnx en :221 y :367 · bloque inalcanzable en :470-515 tras un return en :468"
+      - "risk/entry_filter.py: DEFAULT_EV_FILTER definido en :171 y :264"
+      - "jobs/runners/walkforward_v2.py: _create_regime_classifier en :194 y :213 · escritura atomica en :245 y :258 · 11 campos de dataclass declarados 2-3 veces cada uno (:70/:78, :69/:109, :73/:110, :74/:111, :100/:102/:115/:117, :87/:143, :105/:120/:146, :106/:121/:147, :99/:114)"
+      - "research/pnl_labeling.py: 6 campos repetidos entre PnLLabelConfig y PnLLabelResult · el bloque de imports esta pegado dos veces (lineas 16-22 y otra vez)"
+      - "risk/entry_filter.py:57: min_win_prob se declara y documenta, y evaluate() no lo lee"
+    por_que_importa: >
+      Los duplicados de dataclass no son cosmeticos: en Python el ultimo
+      declarado gana. min_holding_bars vale 5 aunque la primera declaracion
+      dijera otra cosa, y no hay ninguna forma de verlo leyendo el fichero.
+      Es la clase de defecto que un linter de duplicados encuentra en treinta
+      segundos y que nadie miró porque el fichero era nuevo.
+    fix_propuesto: "Un test de importacion mas un linter de definicion duplicada (flake8-duplicate, o un AST propio). Limpiar en el mismo paso que se escriba el test."
+    coste: medio
+    reversibilidad: trivial
+    estado: ABIERTO
+    siguiente_accion: "R-019 y R-023"
+    detectado_en: "2026-10-14, revision completa del commit bce3e59"
+
+  - id: ISS-053
+    titulo: "Los dos scripts de emergencia llevan el magic 123456 escrito a mano"
+    severidad: MEDIA
+    confirma: si
+    componente: [OPS-006, OPS-007]
+    tipo: defecto_confirmado
+    resumen: >
+      scripts/flatten.py:82 y scripts/reconcile_session.py:78 filtran por
+      magic=123456, los dos con un '# TODO: get from config' al lado.
+      app/main.py, en cambio, usa cfg.system.bot_magic.
+    evidencia:
+      - "scripts/flatten.py:82 -> magic = 123456  # TODO: get from config"
+      - "scripts/reconcile_session.py:78 -> magic != 123456  # TODO: get from config"
+      - "app/main.py usa cfg.system.bot_magic: el valor real del YAML no es 123456"
+    por_que_importa: >
+      Un script de emergencia que no ve las mismas posiciones que el bot es un
+      script de emergencia que no cierra las posiciones del bot. Y ambos
+      estan escritos para el momento en que ya no se puede mirar con calma.
+    por_que_no_es_trivial: >
+      Los dos leen el YAML que ya tienen delante (app.config.load). No es que
+      falte el dato: es que nadie conecto la linea. Por eso el coste es
+      bajo y la consecuencia, alta.
+    fix_propuesto: "Leer cfg.system.bot_magic en los dos. Y un test que afirme que el valor viene del YAML."
+    coste: bajo
+    reversibilidad: trivial
+    estado: ABIERTO
+    siguiente_accion: "R-024, junto con el resto de los scripts de emergencia"
+    detectado_en: "2026-10-14, revision completa del commit bce3e59"
+
+  - id: ISS-054
+    titulo: "El freno de perdida diaria se leeria veinte veces mas blando si el YAML no trae la clave"
+    severidad: MEDIA
+    confirma: si
+    componente: [RISK-002, ALR-001]
+    tipo: riesgo_por_diseno
+    resumen: >
+      runtime/loop.py:1078 lee risk_config.get('max_day_loss_pct', 0.02).
+      El valor por defecto en CODIGO es 0.02 (2 %) y el que declara
+      config/gts.yaml es 3.0 (3 %). Si la clave falta —un YAML editado, un
+      perfil nuevo, una fusion que no la trae— el freno baja de 3 % a 2 %.
+    evidencia:
+      - "runtime/loop.py:1078 -> day_loss_limit = risk_config.get('max_day_loss_pct', 0.02)"
+      - "config/gts.yaml:309 -> risk.max_day_loss_pct: 3.0"
+      - "Los dos valores no coinciden, y el de codigo es el mas blando"
+    por_que_importa: >
+      Es un freno de riesgo con dos definiciones y la que gana si falta la
+      buena. No es un defecto hoy —el YAML trae la clave— pero es el patron
+      que este proyecto ya sabe identificar (ver ISS-005, la puerta R:R que el
+      panel podia apagar). Un freno que depende de que una clave este escrita
+      no es un freno.
+    fix_propuesto: >
+      Que el valor por defecto en codigo sea el MAS CONSERVADOR de los dos, y
+      un test que afirme que el YAML declara la clave. Si falta, que el bot se
+      niegue a arrancar en lugar de usar un default.
+    coste: bajo
+    reversibilidad: trivial
+    estado: ABIERTO
+    siguiente_accion: "R-025"
+    detectado_en: "2026-10-14, revision completa del commit bce3e59"
+
+  - id: ISS-055
+    titulo: "El servidor de modelo sirve un formato que el bot no sabe leer"
+    severidad: MEDIA
+    confirma: si
+    componente: [SER-001, SER-002, ML-001]
+    tipo: divergencia_de_diseño
+    resumen: >
+      serving/model_server.py carga un checkpoint .pt o un .onnx. El bot no
+      consume ninguno de los dos: consume un .json de ModelStrategy, con sus
+      feature_names y su forma canonica, y hoy NO HAY NINGUNO en disco
+      (config/gts.yaml:32 declara data/models/xauusdm_h4_logistic.json, y el
+      directorio data/models/ no existe).
+    evidencia:
+      - "config/gts.yaml:32 -> model_path: data/models/xauusdm_h4_logistic.json"
+      - "No existe data/models/ en el arbol"
+      - "app/signal.py::resolve() no hace fallback: con source=model y el fichero ausente, falla de forma explicita"
+      - "Los .pt de checkpoints_training/ son checkpoints de ENTRENAMIENTO (reanudar), no de inferencia"
+    por_que_importa: >
+      Es la respuesta a la pregunta que se hizo el 2026-10-14 ('¿el modelo .pt
+      no lo usa?'): no, y no hay modelo que usar en ningun formato. El sistema
+      opera con reglas. Todo lo que se sirvio y se monitorizo esta midiendo
+      una ruta que el bot no recorre.
+    por_que_no_se_arrregla_ya: >
+      Arreglarlo exige decidir una de dos cosas, y las dos son decisiones de
+      arquitectura, no de codigo: (a) exportar el UniversalModel a un .json que
+      ModelStrategy sepa leer, o (b) documentar que el servidor de modelo es un
+      camino paralelo para sistemas externos y que el bot no lo consume.
+    fix_propuesto: "Decidir (a) o (b) y escribirlo en DECISIONS.md. Mientras no se decida, el bot sigue en rules y el servidor sirve a nadie."
+    coste: "medio si es (a); trivial si es (b)"
+    reversibilidad: trivial
+    estado: ABIERTO
+    requiere_decision_del_propietario: true
+    siguiente_accion: "R-026. Preguntar al dueno: son dos caminos o uno?"
+    detectado_en: "2026-10-14, revision completa del commit bce3e59"
+
+  - id: ISS-056
+    titulo: "ISSUES.yaml no parseaba: el inventario estructurado no era parseable"
+    severidad: MEDIA
+    confirma: si
+    componente: [QA-004]
+    tipo: dato_corrupto
+    resumen: >
+      project-control/ISSUES.yaml llevaba al menos un commit con un error de
+      sintaxis YAML: una ruta de Windows dentro de un escalar de comillas
+      dobles. El fichero que el proyecto llama 'el inventario estructurado de
+      problemas' no se podia cargar con un parser. Defecto ANTERIOR a la
+      sesion del 2026-10-14 (verificado contra bce3e59^).
+    evidencia:
+      - "yaml.safe_load -> ScannerError: 'found unknown escape character l' en la linea 677"
+      - 'linea 677: verificado: "... Select-String runtime\loop.py ..." — la secuencia \l no es un escape valido en YAML'
+      - "Los otros tres (COMPONENTS, ROADMAP, EVIDENCE) SI parseaban"
+      - "Por que dormia: git grep encuentra referencias a estos ficheros solo desde cuatro .md. Nadie los carga"
+    por_que_importa: >
+      D-021 dice que project-control/ es la fuente de verdad estructurada y
+      que memory-graph.jsonl no es inventario. Un inventario que no parsea no
+      es un inventario: es prosa con comillas. Y el fallo era invisible
+      porque nadie lo leia por programa — que es exactamente el modo de fallo
+      que D-022 dice que este mapa existe para evitar.
+    fix_aplicado: >
+      Comillas simples en la linea 677. Los cuatro ficheros parsean hoy
+      (medido: COMPONENTS 62 · ISSUES 48 · ROADMAP 27 · EVIDENCE 5). La
+      causa de fondo —que nadie los parsea— sigue viva, y por eso el arreglo
+      del sintoma no cierra el problema.
+    coste: trivial
+    reversibilidad: trivial
+    estado: PARCIAL
+    siguiente_accion: >
+      Anadir un test que haga yaml.safe_load sobre los cuatro ficheros del
+      mapa. Es un test de seis lineas y es el unico que convierte
+      'inventario estructurado' en algo que se pueda afirmar. R-019 lo cubre.
+    detectado_en: "2026-10-14, al intentar contar los issues nuevos para escribir en este fichero"

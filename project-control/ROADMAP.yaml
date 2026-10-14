@@ -540,6 +540,304 @@ tareas:
     coste: "trivial"
     riesgo: "nulo"
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# BLOQUE D — Lo que el commit bce3e59 dejo a medias (2026-10-14)
+#
+# POR QUE ESTE BLOQUE EXISTE: quince modulos nuevos en tres commits y CERO
+# tests. Dos NameError, un cableado de alertas que no llega, un token en
+# claro y 176 ficheros de basura en el indice. Todo ello por escribir rapido y
+# no mirar lo que ya estaba. Este bloque devuelve la regla que D-030 ya
+# decia y que esta sesio se cumplio en la practica: la correccion va antes que
+# la funcionalidad, y aqui hay una oportunidad de coste bajo.
+#
+# EL ORDEN MANDA: primero lo que no se puede arreglar desde dentro del
+# repositorio (el token), luego lo que es mentira activa (el runbook), luego
+# lo barato que caza lo caro (tests de importacion), y al final lo caro.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+  - id: R-017
+    prioridad: 17
+    titulo: "Que el bot pueda emitir alertas de verdad"
+    justificacion: >
+      Hoy el sistema de alertas no hace nada desde el bot, por dos capas
+      encadenadas: el RuntimeConfig no lleva la configuracion, y los
+      manejadores son sincronos con asyncio.create_task(). 451 lineas de codigo
+      que el proceso que las necesita no puede ejecutar. El canal SI funciona
+      (medido: entrega en el grupo), y por eso el defecto es peor: parece
+      que esta todo bien.
+    resuelve: [ISS-046]
+    componentes: [OBS-004, ALR-001]
+    depende_de: []
+    bloquea_a: [R-020]
+    tareas:
+      - "Unificar los dos AlertsConfig (app/config.py:289 y core/ports/profiles.py:130): uno solo, en el sitio que los dos pueden importar"
+      - "Pasar alerts=cfg.alerts en app/main.py:189"
+      - "Sustituir asyncio.create_task por una cola con threading o un hilo que el bucle sincrono drene"
+      - "Arrancar el AlertMonitor desde el propio bot, o dejar de fingir que model_serving_down existe"
+      - "Un test que afirme el CABLEADO, no que la funcion existe: monkeypatch del canal y emission real desde el bucle"
+    criterios_aceptacion:
+      - "Un fill del bot llega al canal, verificado por test y no por inspeccion"
+      - "El YAML sin seccion alerts NO rompe el bot, y dice por log que no hay canal"
+      - "El limite de 50/hora y la deduplicacion de 300 s se pueden ver en un test"
+    coste: "medio"
+    reversibilidad: trivial
+    riesgo: "bajo"
+
+  - id: R-018
+    prioridad: 18
+    titulo: "Revocar el token de Telegram y sacarlo del repositorio"
+    justificacion: >
+      La unica de las criticas que NO se arregla desde el repositorio. El
+      token esta en claro en config/gts.yaml:471 y en
+      config/alertmanager.yml:27. Cualquiera con el arbol puede escribir en
+      el grupo de senales. Revocar es una accion en @BotFather; sacar el valor
+      del YAML es codigo. Si solo se hace la segunda, el token viejo sigue
+      vivo para cualquiera que tenga el historial.
+    resuelve: [ISS-047]
+    componentes: [ALR-001, SEG-004]
+    depende_de: []
+    bloquea_a: []
+    requiere_decision_del_propietario: true
+    opciones:
+      - "A: Revocar, sacar a variable de entorno, y limpiar el historial. Es la unica que deja de doler"
+      - "B: Revocar y sacar a variable de entorno, sin reescribir el historial. Menos costoso; el token viejo sigue en commits antiguos"
+      - "C: Solo sacarlo del YAML. NO resuelve nada: el token sigue valido para el mundo"
+    tareas:
+      - "Revocar en @BotFather y emitir uno nuevo"
+      - "Mover el valor a dashboard/.env (ya esta en .gitignore) o a variable de entorno, y que la ausencia sea un aviso y no un 500"
+      - "Una valla que impida que un bot_token con forma 123456:AAgh... vuelva a un fichero versionado"
+    criterios_aceptacion: ["git grep del token nuevo devuelve cero", "Una valla falla si alguien pega un token"]
+    coste: "bajo"
+    reversibilidad: "media (limpiar el historial reescribe commits)"
+    riesgo: "bajo"
+    nota: "Recomendacion: A. Es la unica accion de esta lista que reduce el riesgo en vez de solo mejorar la calidad."
+
+  - id: R-019
+    prioridad: 19
+    titulo: "Tests de importacion y de contrato para los 13 modulos nuevos"
+    justificacion: >
+      Es la tarea mas barata de la lista y la que mas defectos caza. Un solo
+      test de importacion por modulo encuentra los DOS NameError (defaultdict
+      sin importar en pnl_labeling, y state/total_folds/current_symbol sin
+      definir en walkforward_v2). Uno de contrato sobre las claves de config
+      encuentra el magic cableado y el max_day_loss_pct duplicado. Y una
+      valla AST — el patron que ya existe para el panel, D-031 — impide que
+      el proximo commit repita esto.
+    resuelve: [ISS-048, ISS-049, ISS-052, ISS-054]
+    componentes: [QA-005, MLX-001, WF2-001, EVF-001, OPS-004, OPS-006, SER-001]
+    depende_de: []
+    bloquea_a: [R-020]
+    tareas:
+      - "Un test de importacion por modulo: los 13 tienen que importar sin excepción"
+      - "Un test de contrato por modulo: las claves de config que lee estan declaradas en config/gts.yaml"
+      - "Un test de la formula EV y de su frontera: E == umbral se ADMITE, y el motivo va escrito"
+      - "Un test que afirme que flatten.py y reconcile_session.py toman el magic de cfg.system.bot_magic"
+      - "Valla AST: ningun modulo nuevo entra sin test"
+    criterios_aceptacion:
+      - "grep de los 13 nombres sobre tests/ deja de dar cero"
+      - "La valla falla si se anade un modulo sin test (probado que falla)"
+    coste: "bajo"
+    reversibilidad: trivial
+    riesgo: "nulo"
+
+  - id: R-020
+    prioridad: 20
+    titulo: "Ejecutar UN fold y UN epoch, y mirar lo que sale"
+    justificacion: >
+      Los tres pilares estan escritos y ninguno se ha ejecutado nunca de
+      punta a punta. Esto no es una tarea de codigo: es una tarea de mirar.
+      Y puede que lo que salga no valga —los tres pilares se construyeron en
+      paralelo con un resultado medido NEGATIVO (ECO-001) de fondo, y eso hay
+      que decirlo antes de mirar, no despues.
+    resuelve: [ISS-049]
+    componentes: [WF2-001, MLX-001, MLC-001, VAL-002]
+    depende_de: [R-019, R-017]
+    bloquea_a: [R-003]
+    requiere_decision_del_propietario: true
+    tareas:
+      - "UN fold de walkforward_v2 sobre un simbolo, con la procedencia escrita. Ni cinco: uno"
+      - "UN epoch de PnLTrainingConfig. Ni cien: uno"
+      - "Anotar el numero en EVIDENCE.yaml con el comando y la fecha, salga el que salga"
+      - "Decidir que hacer con MLC-001: se implementa o se borra (hoy es un stub con nombre de capacidad)"
+    criterios_aceptacion: ["EVIDENCE.yaml tiene las dos filas con comando, fecha y numero real"]
+    coste: "medio (tiempo de calculo)"
+    reversibilidad: trivial
+    riesgo: "bajo"
+
+  - id: R-021
+    prioridad: 21
+    titulo: "Sacar 176 ficheros de basura del indice de git"
+    justificacion: >
+      bce3e59 se hizo con git add -A y se llevo por delante 171 artefactos de
+      tmp_pytest*/ y data/tests/, cuatro logs de arranque y tres scripts de
+      prueba que no son parte del sistema. El .gitignore se modifico en el
+      MISMO commit, despues de anadir. Resultados de tests versionados son
+      una invitacion a que alguien los cite como evidencia de una corrida que
+      no fue tal.
+    resuelve: [ISS-050]
+    componentes: [QA-005, SEG-004]
+    depende_de: []
+    bloquea_a: []
+    requiere_decision_del_propietario: true
+    opciones:
+      - "A: git rm --cached de los 176, regla en .gitignore, y decision de reescribir o no el commit"
+      - "B: Solo las reglas de .gitignore, y el indice se queda como esta"
+      - "C: Reescribir el commit. Limpio, pero destruye el hash que ya aparece en RUNBOOK_LIVE.md y en el informe"
+    tareas:
+      - "git rm --cached de tmp_pytest*/, data/tests/, _otra_forma0/, *.log, y los scripts de prueba de la raiz"
+      - "SIN borrar del disco de trabajo: esto es limpieza del indice, no del arbol"
+      - "Regla en .gitignore para tmp_pytest*/ y los *.log de la raiz"
+      - "Decidir que hacer con testmt5.py, test_pnl.py y test_server.py: o entran en tests/ como lo que son, o se borran"
+    criterios_aceptacion: ["git ls-files no devuelve ninguno de los 176", "Una corrida de tests no vuelve a ensuciar el indice"]
+    coste: "bajo"
+    reversibilidad: trivial
+    riesgo: "nulo"
+
+  - id: R-022
+    prioridad: 22
+    titulo: "Arreglar RUNBOOK_LIVE.md o retirarlo de la circulacion"
+    justificacion: >
+      El runbook es el documento que se sigue con prisa y con dinero en la
+      cuenta, y siete de sus afirmaciones no existen: python -m gts flatten,
+      python -m gts stop, sudo systemctl en una maquina Windows, /health del
+      bot, una cadena de hash que nadie verifica, y un 'Step 4' duplicado.
+      Un runbook con comandos inventados es PEOR que no tener runbook: no
+      falla al leerlo, falla a las tres de la manana.
+    resuelve: [ISS-051]
+    componentes: [LIVE-002, OPS-006, OPS-007]
+    depende_de: []
+    bloquea_a: []
+    tareas:
+      - "Las siete lineas corregidas contra el codigo real, no de memoria"
+      - "Anadir scripts/go_live.py, --strict y la pila de observabilidad, que el documento no menciona"
+      - "Quitar la palabra DRAFT, o cambiar el titulo por uno que no invite a ejecutarlo"
+      - "Un test que extraiga los comandos del runbook y compruebe que cada uno tiene su --help"
+    criterios_aceptacion: ["Cero comandos del runbook que no se puedan copiar y ejecutar"]
+    coste: "bajo"
+    reversibilidad: trivial
+    riesgo: "nulo"
+
+  - id: R-023
+    prioridad: 23
+    titulo: "Limpiar el codigo duplicado por concatenacion"
+    justificacion: >
+      Los ficheros del commit bce3e59 se montaron pegando bloques. load_pytorch
+      dos veces, DEFAULT_EV_FILTER dos veces, once campos de dataclass
+      repetidos, un bloque de imports pegado dos veces, un bloque inalcanzable
+      tras un return. Los duplicados de dataclass no son cosmeticos: en
+      Python gana el ultimo, y min_holding_bars vale 5 aunque la primera
+      declaracion dijera otra cosa. Nadie lo ve leyendo.
+    resuelve: [ISS-052]
+    componentes: [SER-001, EVF-001, WF2-001, MLX-001]
+    depende_de: [R-019]
+    bloquea_a: []
+    tareas:
+      - "Un linter de definicion duplicada (flake8-duplicate, o un AST propio): que lo diga y no que lo muestre"
+      - "Limpiar los cinco ficheros en el mismo paso en que se escriba su test"
+    criterios_aceptacion: ["El linter pasa en verde en los cuatro ficheros"]
+    coste: "medio"
+    reversibilidad: trivial
+    riesgo: "bajo"
+
+  - id: R-024
+    prioridad: 24
+    titulo: "Los scripts de emergencia, que se ejecutan con dinero delante"
+    justificacion: >
+      flatten.py y reconcile_session.py son los dos ficheros con menos tests y
+      mas consecuencias del repositorio. Los dos llevan magic=123456 escrito a
+      mano; los dos tienen codigo muerto (build_runtime_config con un pass, un
+      Intent fabricado con type()); y uno — la reconciliacion — trata un diario
+      inexistente como 'cero operaciones', que es la forma mas silenciosa de
+      decir que todo cuadra cuando no cuadra nada.
+    resuelve: [ISS-053]
+    componentes: [OPS-006, OPS-007]
+    depende_de: [R-019]
+    bloquea_a: []
+    tareas:
+      - "Leer cfg.system.bot_magic en los dos, con su test"
+      - "flatten.py: importar el Intent del puerto real y borrar build_runtime_config, que no llama nadie"
+      - "reconcile_session.py: un diario ausente es un FALLO con motivo, no una lista vacia"
+      - "preflight_live.py: rutas de directorio contra la raiz del repositorio, no contra el CWD"
+      - "Ejecutarlos una vez en demo, de verdad, con una posicion simulada"
+    criterios_aceptacion:
+      - "flatten.py cierra en simulacion una posicion del bot, no una de otro magic"
+      - "Un diario ausente devuelve codigo distinto de cero"
+    coste: "medio"
+    reversibilidad: trivial
+    riesgo: "bajo"
+
+  - id: R-025
+    prioridad: 25
+    titulo: "Un solo valor para max_day_loss_pct, y el mas conservador"
+    justificacion: >
+      runtime/loop.py:1078 lee risk_config.get('max_day_loss_pct', 0.02) y el
+      YAML declara 3.0. Si la clave falta —un YAML editado, un perfil nuevo,
+      una fusion que no la trae— el freno baja de 3 % a 2 %. Es el mismo
+      patron que ISS-005, la puerta R:R que el panel podia apagar: un freno
+      que depende de que una clave este escrita no es un freno.
+    resuelve: [ISS-054]
+    componentes: [RISK-002, ALR-001]
+    depende_de: []
+    bloquea_a: []
+    tareas:
+      - "Que el default en codigo sea el MAS CONSERVADOR de los dos"
+      - "Si la clave falta, que el bot se niegue a arrancar en vez de elegir un default"
+      - "Un test que afirme que el YAML declara la clave"
+    criterios_aceptacion: ["Un YAML sin la clave NO produce un freno mas blando"]
+    coste: "bajo"
+    reversibilidad: trivial
+    riesgo: "nulo"
+
+  - id: R-026
+    prioridad: 26
+    titulo: "Decidir si el servidor de modelo alimenta al bot o es un camino paralelo"
+    justificacion: >
+      serving/model_server.py carga un .pt o un .onnx. El bot carga un .json de
+      ModelStrategy, y hoy no hay ninguno en disco (config/gts.yaml declara
+      data/models/xauusdm_h4_logistic.json; el directorio no existe). Todo lo
+      que se sirvio y se monitorizo esta midiendo una ruta que el bot no
+      recorre. Son dos decisiones, no una, y ninguna es tecnica.
+    resuelve: [ISS-055]
+    componentes: [SER-001, SER-002, MLC-001, ML-001]
+    depende_de: []
+    bloquea_a: []
+    requiere_decision_del_propietario: true
+    opciones:
+      - "A: Exportar el UniversalModel a un .json que ModelStrategy sepa leer, y que el bot lo consuma. Camino largo, y hace falta un modelo entrenado antes"
+      - "B: Declarar que el servidor es un camino paralelo para sistemas externos, y que el bot no lo consume. Trivial, y honesto"
+      - "C: Quitar el servidor de modelo del repositorio hasta que haya un modelo que servir"
+    criterios_aceptacion: ["Queda escrito en DECISIONS.md cual de las tres, y por que"]
+    coste: "alto si A; trivial si B o C"
+    reversibilidad: trivial
+    riesgo: "nulo"
+    nota: >
+      B es la que este mapa recomienda HOY. A no se puede cerrar antes de
+      R-020, porque no hay modelo que exportar, y un servidor de inferencia sin
+      modelo es una promesa. La pregunta de fondo —¿de donde sale el primer
+      modelo?— no se ha resuelto, y es mas grande que esta tarea.
+
+  - id: R-027
+    prioridad: 27
+    titulo: "Que Prometheus raspe solo lo que existe"
+    justificacion: >
+      config/prometheus.yml declara el trabajo 'gts-trading-loop' contra
+      host.docker.internal:9090/metrics. El bot no expone /metrics, y el 9090
+      es el puerto del PROPIO Prometheus. El trabajo no puede estar bien, y un
+      scrape que no puede estar bien entrena al operador a ignorar los targets
+      rojos — que es justo lo que un stack de observabilidad no debe hacer.
+    resuelve: [ISS-052]
+    componentes: [OBS-005, SER-001]
+    depende_de: []
+    bloquea_a: []
+    tareas:
+      - "Decidir: darle al bot un /metrics de verdad, o quitar el trabajo del scrape"
+      - "Si se le da: las metricas del bot son OTRO prefijo (gts_bot_*) y las suyas, no las del servidor de modelo"
+      - "Una comprobacion en el arranque que avise si un target no existe"
+    criterios_aceptacion: ["Cero targets 'down' que sean culpa de scrape inexistente"]
+    coste: "medio"
+    reversibilidad: trivial
+    riesgo: "bajo"
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Lo que NO esta en el roadmap, y por que
 # ═══════════════════════════════════════════════════════════════════════════

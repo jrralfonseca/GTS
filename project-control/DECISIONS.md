@@ -259,7 +259,7 @@ escrito, sin importar el paquete de research.
 por debajo de lo escrito — medido: 25.650 valores del EURUSD_H1.csv cambiaban
 un ulp, la cadena `1.2794699999999999` volvía como `1.27947` (otro double), y
 el `data_hash` del fichero dejaba de cuadrar aunque el fichero fuera
-exactamente el descargado (ISS-037). Por la puerta pasaban el hash y el
+exactamente el descargado (ISS-048). Por la puerta pasaban el hash y el
 replay, pero el entrenamiento y el walk-forward leían por su cuenta: un
 modelo ajustado sobre precios que nadie más puede releer iguales es una
 medida irreproducible por construcción.
@@ -270,3 +270,123 @@ Es deliberado: un adaptador del bot no debe depender del paquete de research
 conformidad entre ambas lecturas la vigila la valla del hash y la
 equivalencia serie/paralelo; si la puerta cambia de criterio, el
 `test_cost_conformity` del mismo precio es donde se verá.
+
+---
+
+## D-033 — `dry-run` es un modo de ejecución, no un perfil
+
+**Decisión:** `execution.profile` y `--dry-run` son **dos ejes distintos**.
+El perfil (`research · backtest · paper · shadow · demo · live`) decide *qué
+puerto de órdenes* existe; `--dry-run` decide *si ese puerto manda*. Un
+`--dry-run` sobre `live` no llama nunca a `mt5.order_send()`. El perfil no
+baja por el hecho de que el modo esté activo.
+
+**Por qué:** durante días seouleurs "demo" y "dry-run" como sinónimos, y no
+lo son. Un perfil `demo` **con** envío es una cuenta de práctica con dinero
+virtual en riesgo; un perfil `live` **sin** envío es el rehearsal exacto de lo
+que se hará mañana. Confundirlos produce dos errores opuestos y ambos caros:
+creer que se puede gastar cuando no, o creer que no se puede gastar cuando sí.
+
+**Qué se paga:** dos banderas donde bastaba una, y el panel tiene que explicar
+las dos. Se acepta: el botón del panel es siempre `--dry-run`, y el perfil se
+dice al lado.
+
+---
+
+## D-034 — LIVE exige dos llaves, y las dos a la vez
+
+**Decisión:** el envío real exige `execution.live.enabled: true` **y**
+`execution.live.allow_funded: true` **y** `account_info().trade_mode != DEMO`.
+Si falta cualquiera de las tres, no hay puerto de órdenes.
+
+**Por qué:** `live.enabled` solo se puede decir que sí por accidente — un
+`git checkout` de una rama con el flag puesto, un YAML editado a deshora, un
+`deep_merge` que sobrescribe lo que el fichero decía. `allow_funded` es una
+afirmación deliberada y explícita de que hay dinero detrás, y `trade_mode` es
+la comprobación que **el broker** hace, no el YAML. Dos afirmaciones locales y
+una externa: si las tres se cumplen, ninguna puede fallar sola.
+
+**Qué se paga:** `scripts/go_live.py --profile live --allow-funded` no basta
+por sí mismo; el pre-flight se encarga de decir qué falta, con nombre. Es el
+motivo de que el pre-flight devuelva un código de salida y no un log.
+
+---
+
+## D-035 — La fuente de señal es una, no una mezcla
+
+**Decisión:** `app/signal.py::resolve()` devuelve **exactamente una** fuente:
+`rules` **o** `model`, según `signal.source`. No hay fusión, ni ponderación,
+ni *fallback* de una a otra.
+
+**Por qué:** se creía que las reglas y el modelo actuaban a la vez. No: una
+fusión sin pesos publicados no es auditable — cuando las dos señales discrepan,
+no hay forma de saber cuál Weighed más, y por tanto no hay forma de explicar
+una operación. Y un *fallback* silencioso es peor: si el modelo falla al
+cargar, el sistema empezaría a operar con reglas sin que nadie lo supiera. Hoy
+`resolve()` falla de forma explícita, que es lo correcto.
+
+**Qué se paga:** dos sistemas que mantener para producir una decisión. Es
+caro y es honesto. La alternativa —una fusión— sería más barata de mantener y
+más cara de explicar.
+
+---
+
+## D-036 — El refresco lo hornea el servidor; el HTML nunca lo fija
+
+**Decisión:** el intervalo de refresco vive en la cookie `gts-refresco`, la
+validan `_REFRESCOS_VALIDOS = (1, 2, 5, 10, 30)`, y **el servidor lo pone en
+el HTML** en el momento de servirlo. Un valor desconocido o manipulado se
+ignora y se cae al defecto (2 s).
+
+**Por qué:** los elementos que el operador está rellenando —el `<select>` de
+"Fuente de señal", el campo de motivo, el `<details>` que los contiene— viven
+dentro de `#bot-vivo`, que se re-pide cada N segundos. Dos salidas: subir el
+intervalo a 30 s, o marcar esos elementos con `hx-preserve="true"`. Se han
+hecho **las dos**, y se explican juntas: `hx-preserve` para lo que el
+operador está usando ahora mismo, el intervalo largo para lo que no.
+
+**Qué se paga:** una cookie de preferencia para una preferencia que casi
+nadie cambia. Y una regla general que conviene tener escrita, porque es
+fácil de romper sin querer: **un fragmento que se refresca no puede
+contener un mensaje**. Los POST devuelven la pieza y el aviso por separado.
+
+---
+
+## D-037 — El camino a live se construye entero y se deja cerrado
+
+**Decisión:** el camino a live está completo —perfiles, doble llave, gateway
+MT5, pre-flight, aplanado, reconciliación, runbook— y `live.enabled` sigue en
+`false`. El techo operativo es **demo**. La decisión la tomó el dueño el
+2026-10-14 y es la correcta: el sistema no tiene ninguna evidencia
+confirmada (`ECO-001`, resultado medido **negativo**), y poner dinero detrás
+de un sistema que no ha encontrado nada que operar seríaография de vanidad.
+
+**Por qué:** tener el camino listo y no recorrerlo son dos estados
+compatibles. Lo que no es aceptable es un camino *a medio construir* que
+parezca disponible. `scripts/go_live.py --profile live --allow-funded` está
+ahí, y si alguien lo ejecuta el pre-flight le dirá exactamente qué falta.
+
+**Qué se paga:** plumbing que hoy no ejecuta nada. Es el precio de que,
+cuando llegue el momento —y el registro confirme una regla—, no haya que
+inventar la infraestructura con el mercado abierto.
+
+---
+
+## D-038 — Un runbook con comandos que no existen es peor que ningún runbook
+
+**Decisión:** las divergencias entre `RUNBOOK_LIVE.md` y el código **se
+documentan como defectos** (`ISS-` en `ISSUES.yaml`), no se corrigen en
+silencio ni se anotan como "pendiente de pulir". El documento queda
+marcado **DRAFT** y la lista de las siete divergencias está en
+`INFORME_LIVE_Y_MONITORING.md` §5.7.
+
+**Por qué:** un runbook se sigue *durante* una sesión real, con prisa y con
+dinero en la cuenta. `python -m gts flatten --force` no existe; quien lo
+copie pierde minutos justo cuando no puede perderlos. Un documento que
+promete comandos inexistentes no es un borrador: es una trampa con la
+apariencia de un procedimiento.
+
+**Qué se paga:** el runbook queda declarado no ejecutable, y `preflight_live`
+—que sí existe y sí funciona— es de momento la única puerta real. Es un
+estado peor que "todo bien" y mucho mejor que "todo bien, según el
+documento".
